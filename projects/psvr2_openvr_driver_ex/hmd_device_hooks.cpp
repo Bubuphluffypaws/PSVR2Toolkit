@@ -22,6 +22,11 @@ namespace psvr2_toolkit {
     vr::EVRInitError result = sie__psvr2__HmdDevice__Activate(thisptr, unObjectId);
     vr::PropertyContainerHandle_t ulPropertyContainer = vr::VRProperties()->TrackedDeviceToPropertyContainer(unObjectId);
 
+    // Tell SteamVR we want the chaperone visibility disabled if we're actually disabling the chaperone.
+    if (VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_CHAPERONE, SETTING_DISABLE_CHAPERONE_DEFAULT_VALUE)) {
+      vr::VRProperties()->SetBoolProperty(ulPropertyContainer, vr::Prop_DriverProvidedChaperoneVisibility_Bool, false);
+    }
+
     // Tell SteamVR to allow runtime framerate changes.
     // SteamVR does not allow this feature on AMD GPUs, so this is NVIDIA-only currently.
     vr::VRProperties()->SetBoolProperty(ulPropertyContainer, vr::Prop_DisplaySupportsRuntimeFramerateChange_Bool, true);
@@ -29,7 +34,7 @@ namespace psvr2_toolkit {
     // Tell SteamVR to allow night mode setting.
     vr::VRProperties()->SetBoolProperty(ulPropertyContainer, vr::Prop_DisplayAllowNightMode_Bool, true);
 
-    // Tell SteamVR our dashboard scale, which matches Valve Index.
+    // Tell SteamVR our dashboard scale.
     vr::VRProperties()->SetFloatProperty(ulPropertyContainer, vr::Prop_DashboardScale_Float, .9f);
 
 #ifdef OPENVR_EXTENSIONS_AVAILABLE
