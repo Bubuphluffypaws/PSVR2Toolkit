@@ -17,8 +17,6 @@ using namespace psvr2_toolkit::ipc;
 
 namespace psvr2_toolkit {
 
-  void (*libpadLedSyncSetGradualSync)(int value);
-
   DeviceProviderProxy *DeviceProviderProxy::m_pInstance = nullptr;
 
   DeviceProviderProxy::DeviceProviderProxy()
@@ -88,9 +86,6 @@ namespace psvr2_toolkit {
 
   void DeviceProviderProxy::InstallHooks() {
     static HmdDriverLoader *pHmdDriverLoader = HmdDriverLoader::Instance();
-
-    libpadLedSyncSetGradualSync = decltype(libpadLedSyncSetGradualSync)(pHmdDriverLoader->GetBaseAddress() + 0x1C17F0);
-    libpadLedSyncSetGradualSync(!VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_GRADUAL_SYNC, SETTING_DISABLE_GRADUAL_SYNC_DEFAULT_VALUE));
 
     // Remove signature checks.
     HookLib::InstallStubRet0(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x134FF0)); // VrDialogManager::VerifyLibrary

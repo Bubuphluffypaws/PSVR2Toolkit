@@ -22,18 +22,6 @@ namespace psvr2_toolkit {
     vr::EVRInitError result = sie__psvr2__HmdDevice__Activate(thisptr, unObjectId);
     vr::PropertyContainerHandle_t ulPropertyContainer = vr::VRProperties()->TrackedDeviceToPropertyContainer(unObjectId);
 
-    vr::VRProperties()->SetBoolProperty(ulPropertyContainer,
-                                        vr::Prop_DriverProvidedChaperoneVisibility_Bool,
-                                        !VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_CHAPERONE, SETTING_DISABLE_CHAPERONE_DEFAULT_VALUE));
-
-    // This works perfectly fine on NVIDIA GPUs, but is broken on AMD GPUs newer than RDNA2/RX6000-series.
-    vr::VRProperties()->SetBoolProperty(ulPropertyContainer,
-                                        vr::Prop_Hmd_SupportsHDR10_Bool,
-                                        VRSettings::GetBool(STEAMVR_SETTINGS_ENABLE_HDR10, SETTING_ENABLE_HDR10_DEFAULT_VALUE));
-    if (VRSettings::GetBool(STEAMVR_SETTINGS_ENABLE_HDR10, SETTING_ENABLE_HDR10_DEFAULT_VALUE)) {
-        Util::DriverLog("Enabling HDR10 on PSVR2...");
-    }
-
     // Tell SteamVR to allow runtime framerate changes.
     // SteamVR does not allow this feature on AMD GPUs, so this is NVIDIA-only currently.
     vr::VRProperties()->SetBoolProperty(ulPropertyContainer, vr::Prop_DisplaySupportsRuntimeFramerateChange_Bool, true);
@@ -42,7 +30,7 @@ namespace psvr2_toolkit {
     vr::VRProperties()->SetBoolProperty(ulPropertyContainer, vr::Prop_DisplayAllowNightMode_Bool, true);
 
     // Tell SteamVR our dashboard scale, which matches Valve Index.
-    vr::VRProperties()->SetFloatProperty(ulPropertyContainer, vr::Prop_DashboardScale_Float, .75f);
+    vr::VRProperties()->SetFloatProperty(ulPropertyContainer, vr::Prop_DashboardScale_Float, .9f);
 
 #ifdef OPENVR_EXTENSIONS_AVAILABLE
     psvr2_toolkit::openvr_ex::OnHmdActivate(ulPropertyContainer, &g_pOpenVRExHandle);
