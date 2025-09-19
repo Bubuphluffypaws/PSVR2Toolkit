@@ -14,6 +14,14 @@ namespace psvr2_toolkit {
       return strncmp(a, b, strlen(b)) == 0;
     }
 
+    static bool IsRunningWine() {
+      HMODULE hModule = GetModuleHandleW(L"ntdll.dll");
+      if (!hModule) {
+        return false;
+      }
+      return GetProcAddress(hModule, "wine_get_version") != nullptr;
+    }
+
     static bool IsProcessRunning(DWORD dwProcessId) {
       HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
       if (hSnapshot == INVALID_HANDLE_VALUE) {
