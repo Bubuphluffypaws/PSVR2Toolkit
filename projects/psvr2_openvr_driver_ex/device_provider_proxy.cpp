@@ -1,5 +1,6 @@
 #include "device_provider_proxy.h"
 
+#include "config.h"
 #include "caesar_manager_hooks.h"
 #include "driver_context_proxy.h"
 #include "hmd_device_hooks.h"
@@ -43,8 +44,6 @@ namespace psvr2_toolkit {
 
     VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
-    vr::VRDriverLog()->Log(__FUNCTION__); // Log our function name here to show that we're proxied.
-
     if (!m_initOnce) {
       InitOnce();
       m_initOnce = true;
@@ -84,8 +83,22 @@ namespace psvr2_toolkit {
   }
 
   void DeviceProviderProxy::InitOnce() {
+    static bool isRunningOnWine = Util::IsRunningOnWine();
+
+    // Log ourselves here to show that we're proxied.
+    Util::DriverLog("PlayStation VR2 Toolkit - v{}.{}.{} [{}]", DRIVER_VERSION_MAJOR, DRIVER_VERSION_MINOR, DRIVER_VERSION_PATCH, DRIVER_VERSION_BRANCH);
+#if DRIVER_IS_PRERELEASE
+    Util::DriverLog("You are using a pre-release build of PlayStation VR2 Toolkit, please report any issues that may occur to the developers!");
+#elif DRIVER_IS_EXPERIMENTAL
+    Util::DriverLog("You are using an experimental build of PlayStation VR2 Toolkit, please report any issues that may occur to the developers!");
+#endif
+
     if (!HookLib::Initialize()) {
       MessageBoxW(nullptr, L"MinHook initialization failed, please report this to the developers!", L"PlayStation VR2 Toolkit (DriverEx)", MB_ICONERROR | MB_OK);
+    }
+
+    if (isRunningOnWine) {
+      Util::DriverLog("PlayStation VR2 Toolkit has detected itself running on Wine, compatibility patches will be applied.");
     }
 
     InitPatches();
@@ -94,24 +107,22 @@ namespace psvr2_toolkit {
 
   void DeviceProviderProxy::InitPatches() {
     static HmdDriverLoader *pHmdDriverLoader = HmdDriverLoader::Instance();
+    static bool isRunningOnWine = Util::IsRunningOnWine();
 
     // Remove signature checks.
     INSTALL_STUB_RET0(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x134FF0)); // VrDialogManager::VerifyLibrary
 
     // If disableSense is enabled, we must disable the overlay and dialog regardless due to a bug.
-    bool isRunningOnWine = Util::IsRunningOnWine(); // Dialog/overlay does not work very well under Wine, we'll disable them from launching.
     if (VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_OVERLAY, SETTING_DISABLE_OVERLAY_DEFAULT_VALUE) ||
         VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_SENSE, SETTING_DISABLE_SENSE_DEFAULT_VALUE) ||
         isRunningOnWine)
     {
-      Util::DriverLog("Disabling PSVR2 overlay...");
       INSTALL_STUB(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x12F830)); // VrDialogManager::CreateDashboardProcess
     }
     if (VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_DIALOG, SETTING_DISABLE_DIALOG_DEFAULT_VALUE) ||
         VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_SENSE, SETTING_DISABLE_SENSE_DEFAULT_VALUE) ||
         isRunningOnWine)
     {
-      Util::DriverLog("Disabling PSVR2 dialog...");
       INSTALL_STUB(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x130020)); // VrDialogManager::CreateDialogProcess
     }
 
