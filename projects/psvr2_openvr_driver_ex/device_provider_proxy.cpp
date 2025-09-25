@@ -20,7 +20,8 @@ namespace psvr2_toolkit {
   DeviceProviderProxy *DeviceProviderProxy::m_pInstance = nullptr;
 
   DeviceProviderProxy::DeviceProviderProxy()
-    : m_pDeviceProvider(nullptr)
+    : m_initOnce(false)
+    , m_pDeviceProvider(nullptr)
   {}
 
   DeviceProviderProxy *DeviceProviderProxy::Instance() {
@@ -40,18 +41,14 @@ namespace psvr2_toolkit {
     Sleep(8000);
 #endif
 
-    if (!HookLib::Initialize()) {
-      MessageBoxW(nullptr, L"MinHook initialization failed, please report this to the developers!", L"PlayStation VR2 Toolkit (DriverEx)", MB_ICONERROR | MB_OK);
-    }
-
     VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
     vr::VRDriverLog()->Log(__FUNCTION__); // Log our function name here to show that we're proxied.
 
-    InstallHooks();
-    InitializeSystems();
-
-    IpcServer::Instance()->Start();
+    if (!m_initOnce) {
+      InitOnce();
+      m_initOnce = true;
+    }
 
     static DriverContextProxy *pDriverContextProxy = DriverContextProxy::Instance();
     pDriverContextProxy->SetDriverContext(pDriverContext);
@@ -82,6 +79,17 @@ namespace psvr2_toolkit {
 
   void DeviceProviderProxy::LeaveStandby() {
     m_pDeviceProvider->LeaveStandby();
+  }
+
+  void DeviceProviderProxy::InitOnce() {
+    if (!HookLib::Initialize()) {
+      MessageBoxW(nullptr, L"MinHook initialization failed, please report this to the developers!", L"PlayStation VR2 Toolkit (DriverEx)", MB_ICONERROR | MB_OK);
+    }
+
+    InstallHooks();
+    InitializeSystems();
+
+    IpcServer::Instance()->Start();
   }
 
   void DeviceProviderProxy::InstallHooks() {
