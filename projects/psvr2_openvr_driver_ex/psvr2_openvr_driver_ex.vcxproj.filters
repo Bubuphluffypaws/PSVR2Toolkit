@@ -112,5 +112,8 @@
     <ClInclude Include="hmd2_gaze.h">
       <Filter>Gaze</Filter>
     </ClInclude>
+    <ClInclude Include="config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

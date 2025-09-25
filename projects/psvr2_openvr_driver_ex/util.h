@@ -1,5 +1,7 @@
 #pragma once
 
+#include "config.h"
+
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdarg.h>
@@ -14,12 +16,16 @@ namespace psvr2_toolkit {
       return strncmp(a, b, strlen(b)) == 0;
     }
 
-    static bool IsRunningWine() {
+    static bool IsRunningOnWine() {
+#if !MOCK_IS_RUNNING_ON_WINE
       HMODULE hModule = GetModuleHandleW(L"ntdll.dll");
       if (!hModule) {
         return false;
       }
       return GetProcAddress(hModule, "wine_get_version") != nullptr;
+#else
+      return true;
+#endif
     }
 
     static bool IsProcessRunning(DWORD dwProcessId) {
