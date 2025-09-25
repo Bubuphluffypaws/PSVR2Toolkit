@@ -50,6 +50,8 @@ namespace psvr2_toolkit {
       m_initOnce = true;
     }
 
+    IpcServer::Instance()->Start();
+
     static DriverContextProxy *pDriverContextProxy = DriverContextProxy::Instance();
     pDriverContextProxy->SetDriverContext(pDriverContext);
     return m_pDeviceProvider->Init(pDriverContextProxy);
@@ -86,13 +88,11 @@ namespace psvr2_toolkit {
       MessageBoxW(nullptr, L"MinHook initialization failed, please report this to the developers!", L"PlayStation VR2 Toolkit (DriverEx)", MB_ICONERROR | MB_OK);
     }
 
-    InstallHooks();
-    InitializeSystems();
-
-    IpcServer::Instance()->Start();
+    InitPatches();
+    InitSystems();
   }
 
-  void DeviceProviderProxy::InstallHooks() {
+  void DeviceProviderProxy::InitPatches() {
     static HmdDriverLoader *pHmdDriverLoader = HmdDriverLoader::Instance();
 
     // Remove signature checks.
@@ -120,7 +120,7 @@ namespace psvr2_toolkit {
     UsbThreadHooks::InstallHooks();
   }
 
-  void DeviceProviderProxy::InitializeSystems() {
+  void DeviceProviderProxy::InitSystems() {
     IpcServer::Instance()->Initialize();
     TriggerEffectManager::Instance()->Initialize();
   }

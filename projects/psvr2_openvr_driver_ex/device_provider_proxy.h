@@ -30,8 +30,9 @@ namespace psvr2_toolkit {
     vr::IServerTrackedDeviceProvider *m_pDeviceProvider;
 
     void InitOnce();
-    void InstallHooks();
-    void InitializeSystems();
+
+    void InitPatches();
+    void InitSystems();
   };
 
 } // psvr2_toolkit
