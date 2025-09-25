@@ -88,7 +88,7 @@ namespace psvr2_toolkit {
     static HmdDriverLoader *pHmdDriverLoader = HmdDriverLoader::Instance();
 
     // Remove signature checks.
-    HookLib::InstallStubRet0(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x134FF0)); // VrDialogManager::VerifyLibrary
+    INSTALL_STUB_RET0(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x134FF0)); // VrDialogManager::VerifyLibrary
 
     // If disableSense is enabled, we must disable the overlay and dialog regardless due to a bug.
     bool isRunningOnWine = Util::IsRunningOnWine(); // Dialog/overlay does not work very well under Wine, we'll disable them from launching.
@@ -97,14 +97,14 @@ namespace psvr2_toolkit {
         isRunningOnWine)
     {
       Util::DriverLog("Disabling PSVR2 overlay...");
-      HookLib::InstallStub(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x12F830)); // VrDialogManager::CreateDashboardProcess
+      INSTALL_STUB(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x12F830)); // VrDialogManager::CreateDashboardProcess
     }
     if (VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_DIALOG, SETTING_DISABLE_DIALOG_DEFAULT_VALUE) ||
         VRSettings::GetBool(STEAMVR_SETTINGS_DISABLE_SENSE, SETTING_DISABLE_SENSE_DEFAULT_VALUE) ||
         isRunningOnWine)
     {
       Util::DriverLog("Disabling PSVR2 dialog...");
-      HookLib::InstallStub(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x130020)); // VrDialogManager::CreateDialogProcess
+      INSTALL_STUB(reinterpret_cast<void *>(pHmdDriverLoader->GetBaseAddress() + 0x130020)); // VrDialogManager::CreateDialogProcess
     }
 
     CaesarManagerHooks::InstallHooks();
