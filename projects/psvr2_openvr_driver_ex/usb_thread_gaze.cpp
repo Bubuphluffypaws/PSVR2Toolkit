@@ -3,6 +3,7 @@
 #include "hmd_driver_loader.h"
 #include "hmd_device_hooks.h"
 #include "eyelid_estimator.h"
+#include "original_eyelid_estimator.h"
 #include "modern_eyelid_estimator.h"
 #include "headset_calibrator.h"
 #include "hmd2_gaze.h"
@@ -39,12 +40,11 @@ CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = false;
 static constexpr bool ENABLE_AB_TESTING = true;
 
-// Estimator instances
-psvr2_toolkit::EyelidEstimator leftEyelidEstimator;        // OLD implementation
-psvr2_toolkit::EyelidEstimator rightEyelidEstimatorOld;    // OLD implementation (backup)
-psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator; // NEW implementation
+// A/B Testing: True baseline vs modern implementation
+psvr2_toolkit::OriginalEyelidEstimator leftEyelidEstimator;   // ORIGINAL master + pupil dilation
+psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation + headset calibration
 
-// Headset calibration system
+// Headset calibration system (for modern implementation)
 psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
 
 void *j_CaesarUsbThreadGaze__dtor_CaesarUsbThreadGaze(CaesarUsbThreadGaze *thisptr, char a2) {
@@ -158,10 +158,11 @@ int CaesarUsbThreadGaze::poll() {
     float leftEyelidOpenness, rightEyelidOpenness;
     
     if (ENABLE_AB_TESTING && !USE_NEW_IMPLEMENTATION_BOTH_EYES) {
-      // A/B Testing Mode: Old (left) vs New (right) with calibration
+      // A/B Testing Mode: Original Master (left) vs Modern (right)
+      // Left eye: Original master implementation + pupil dilation normalization
       leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
       
-      // Use calibrated data for new implementation
+      // Right eye: Modern implementation + headset calibration
       psvr2_toolkit::CalibratedEyeData rightEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->rightEye);
       if (rightEyeData.isValid) {
         // Convert calibrated data to modern estimator format
@@ -181,7 +182,7 @@ int CaesarUsbThreadGaze::poll() {
         rightEyelidOpenness = rightResult.openness;
       }
     } else if (USE_NEW_IMPLEMENTATION_BOTH_EYES) {
-      // New Implementation for Both Eyes with calibration
+      // Modern Implementation for Both Eyes with calibration
       psvr2_toolkit::CalibratedEyeData leftEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->leftEye);
       psvr2_toolkit::CalibratedEyeData rightEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->rightEye);
       
@@ -218,9 +219,9 @@ int CaesarUsbThreadGaze::poll() {
         rightEyelidOpenness = rightResult.openness;
       }
     } else {
-      // Old Implementation for Both Eyes (default)
+      // Original Implementation for Both Eyes (fallback)
       leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
-      rightEyelidOpenness = rightEyelidEstimatorOld.Estimate(pGazeState->rightEye);
+      rightEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->rightEye);
     }
     
     pIpcServer->UpdateGazeState(pGazeState, leftEyelidOpenness, rightEyelidOpenness);

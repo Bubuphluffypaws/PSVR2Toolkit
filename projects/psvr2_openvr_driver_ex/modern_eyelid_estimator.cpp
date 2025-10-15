@@ -49,6 +49,11 @@ namespace psvr2_toolkit {
     // 5. Calculate confidence
     float confidence = CalculateOverallConfidence(allCues);
     
+    // 6. Apply inversion if needed
+    if (m_config.invertOutput) {
+      openness = 1.0f - openness;
+    }
+    
     return {openness, confidence, DeterminePrimaryCue(allCues)};
   }
 
@@ -75,31 +80,49 @@ namespace psvr2_toolkit {
     
     float confidence = CalculateOverallConfidence(cues);
     
+    // Apply inversion if needed
+    if (m_config.invertOutput) {
+      openness = 1.0f - openness;
+    }
+    
     return {openness, confidence, DeterminePrimaryCue(cues)};
   }
 
   CueMeasurement ModernEyelidEstimator::MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs) {
+    // Update dilation normalizer with raw diameter
+    m_dilationNormalizer.UpdateBaseline(eye.pupilDiaMm);
+    
     // Correct for gaze angle ellipticity
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
     float correctionFactor = 1.0f / std::max(std::cos(gazeAngle), 0.1f);
     float correctedDia = eye.pupilDiaMm * correctionFactor;
     
-    // Normalize using gaze-aware references
-    float denom = std::max(refs.openDia.value - refs.closedDia.value, 1e-6f);
-    float normalizedDia = (correctedDia - refs.closedDia.value) / denom;
-    normalizedDia = std::clamp(normalizedDia, 0.0f, 1.0f);
+    // Apply pupil dilation normalization
+    float normalizedDia = m_dilationNormalizer.NormalizeDiameter(correctedDia);
     
-    // Calculate uncertainty based on gaze angle and reference stability
+    // Further normalize using gaze-aware references (secondary normalization)
+    float denom = std::max(refs.openDia.value - refs.closedDia.value, 1e-6f);
+    float refNormalizedDia = (correctedDia - refs.closedDia.value) / denom;
+    refNormalizedDia = std::clamp(refNormalizedDia, 0.0f, 1.0f);
+    
+    // Blend dilation-normalized and reference-normalized values
+    // Use dilation normalization as primary, reference as secondary
+    float blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
+    blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
+    
+    // Calculate uncertainty based on gaze angle, reference stability, and dilation consistency
     float gazeUncertainty = std::sin(gazeAngle);  // Higher angle = more uncertainty
     float refUncertainty = (refs.openDia.stability + refs.closedDia.stability) * 0.5f;
+    float dilationUncertainty = 1.0f - (m_dilationNormalizer.sampleCount > 100 ? 0.8f : 0.3f); // More uncertain early on
     float totalUncertainty = std::sqrt(gazeUncertainty * gazeUncertainty + 
-                                      refUncertainty * refUncertainty);
+                                      refUncertainty * refUncertainty + 
+                                      dilationUncertainty * dilationUncertainty);
     
-    return {normalizedDia, totalUncertainty, 1.0f - totalUncertainty, "diameter"};
+    return {blendedDia, totalUncertainty, 1.0f - totalUncertainty, "diameter"};
   }
 
   CueMeasurement ModernEyelidEstimator::MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs) {
-    // Normalize position
+    // Normalize position - standard logic: higher Y = more open eyes
     float denom = std::max(refs.openPosY.value - refs.closedPosY.value, 1e-6f);
     float normalizedPos = (eye.pupilPosY - refs.closedPosY.value) / denom;
     normalizedPos = std::clamp(normalizedPos, 0.0f, 1.0f);
@@ -140,13 +163,18 @@ namespace psvr2_toolkit {
     float angleConfidence = std::cos(gazeAngle);  // Higher confidence at neutral gaze
     
     if (eye.isBlink) {
-      // Fast learning for closed references
+      // Fast learning for closed references when blinking
       refs.closedDia.Update(eye.pupilDiaMm, 0.8f);
       refs.closedPosY.Update(eye.pupilPosY, 0.8f);
     } else if (IsNeutralGaze(eye.gazeDir)) {
       // Slower learning for open references, only at neutral gaze
-      refs.openDia.Update(eye.pupilDiaMm, 0.3f * angleConfidence);
-      refs.openPosY.Update(eye.pupilPosY, 0.3f * angleConfidence);
+      // Only update if we have a reasonable difference from closed reference
+      if (std::abs(eye.pupilDiaMm - refs.closedDia.value) > 0.5f) {
+        refs.openDia.Update(eye.pupilDiaMm, 0.3f * angleConfidence);
+      }
+      if (std::abs(eye.pupilPosY - refs.closedPosY.value) > 0.1f) {
+        refs.openPosY.Update(eye.pupilPosY, 0.3f * angleConfidence);
+      }
     }
     
     // Update angle-specific references
@@ -261,6 +289,10 @@ namespace psvr2_toolkit {
     data.isValid = eye.isPupilDiaValid && eye.isPupilPosInSensorValid && eye.isGazeDirValid;
     
     return data;
+  }
+
+  void ModernEyelidEstimator::ResetDilationNormalizer() {
+    m_dilationNormalizer = PupilDilationNormalizer();
   }
 
 }

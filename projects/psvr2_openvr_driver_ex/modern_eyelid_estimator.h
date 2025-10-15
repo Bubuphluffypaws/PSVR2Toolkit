@@ -78,6 +78,9 @@ namespace psvr2_toolkit {
     
     // Convert from Hmd2GazeEye to EyeData (public for A/B testing)
     EyeData ConvertFromHmd2Gaze(const Hmd2GazeEye& eye) const;
+    
+    // Reset dilation normalizer (useful for new sessions)
+    void ResetDilationNormalizer();
 
   private:
     // Adaptive learning with exponential moving averages
@@ -116,6 +119,47 @@ namespace psvr2_toolkit {
         , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {}
     } m_leftRefs, m_rightRefs;
     
+    // Pupil dilation normalization system
+    struct PupilDilationNormalizer {
+      float baselineDilation;      // Current baseline pupil size
+      float dilationRange;         // Typical range of dilation variation
+      float adaptationRate;        // How fast to adapt to new baselines
+      int sampleCount;             // Number of samples used for baseline
+      
+      PupilDilationNormalizer() 
+        : baselineDilation(3.5f)   // Default 3.5mm baseline
+        , dilationRange(1.0f)      // 1mm typical range
+        , adaptationRate(0.001f)   // Very slow adaptation
+        , sampleCount(0) {}
+      
+      // Normalize pupil diameter to account for dilation variations
+      float NormalizeDiameter(float rawDiameter) const {
+        if (dilationRange < 0.1f) return rawDiameter; // No normalization if range is too small
+        
+        // Normalize to 0-1 range based on current baseline
+        float normalized = (rawDiameter - (baselineDilation - dilationRange)) / (2.0f * dilationRange);
+        return std::clamp(normalized, 0.0f, 1.0f);
+      }
+      
+      // Update baseline based on recent measurements
+      void UpdateBaseline(float newDiameter) {
+        sampleCount++;
+        
+        // Very slow adaptation to baseline changes
+        baselineDilation = baselineDilation * (1.0f - adaptationRate) + 
+                          newDiameter * adaptationRate;
+        
+        // Update dilation range based on variance
+        float variance = std::abs(newDiameter - baselineDilation);
+        dilationRange = dilationRange * (1.0f - adaptationRate) + 
+                       variance * adaptationRate;
+        
+        // Ensure reasonable bounds
+        baselineDilation = std::clamp(baselineDilation, 2.0f, 6.0f);
+        dilationRange = std::clamp(dilationRange, 0.5f, 2.0f);
+      }
+    } m_dilationNormalizer;
+    
     // Learned neutral gaze (shared between eyes)
     Vector3 m_learnedNeutralGaze;
     float m_neutralGazeConfidence;
@@ -129,6 +173,7 @@ namespace psvr2_toolkit {
       int gazeAngleBins = 10;  // Number of angle-specific reference bins
       float smoothingAlpha = 0.1f;
       float minConfidence = 0.1f;
+      bool invertOutput = true;  // Set to true if output is inverted
     } m_config;
     
     // Cue measurement functions

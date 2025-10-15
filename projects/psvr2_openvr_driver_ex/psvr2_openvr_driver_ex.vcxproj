@@ -188,6 +188,7 @@
     <ClCompile Include="headset_calibrator.cpp" />
     <ClCompile Include="ipc_server.cpp" />
     <ClCompile Include="modern_eyelid_estimator.cpp" />
+    <ClCompile Include="original_eyelid_estimator.cpp" />
     <ClCompile Include="usb_thread_gaze.cpp" />
     <ClCompile Include="usb_thread_hooks.cpp" />
     <ClCompile Include="trigger_effect_manager.cpp" />
@@ -206,6 +207,7 @@
     <ClInclude Include="headset_calibrator.h" />
     <ClInclude Include="ipc_server.h" />
     <ClInclude Include="modern_eyelid_estimator.h" />
+    <ClInclude Include="original_eyelid_estimator.h" />
     <ClInclude Include="hmd_math.h" />
     <ClInclude Include="pad_trigger_effect.h" />
     <ClInclude Include="vr_settings.h" />
