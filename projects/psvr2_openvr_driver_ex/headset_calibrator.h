@@ -1,39 +1,11 @@
 #pragma once
 
 #include "hmd2_gaze.h"
+#include "modern_eyelid_estimator.h"
 #include <cmath>
 #include <vector>
 
 namespace psvr2_toolkit {
-
-  struct Vector3 {
-    float x, y, z;
-    Vector3(float x = 0, float y = 0, float z = 0) : x(x), y(y), z(z) {}
-    
-    float Magnitude() const {
-      return std::sqrt(x * x + y * y + z * z);
-    }
-    
-    Vector3 Normalized() const {
-      float mag = Magnitude();
-      if (mag > 1e-6f) {
-        return Vector3(x / mag, y / mag, z / mag);
-      }
-      return Vector3(0, 0, 1);
-    }
-    
-    float Dot(const Vector3& other) const {
-      return x * other.x + y * other.y + z * other.z;
-    }
-    
-    Vector3 Cross(const Vector3& other) const {
-      return Vector3(
-        y * other.z - z * other.y,
-        z * other.x - x * other.z,
-        x * other.y - y * other.x
-      );
-    }
-  };
 
   struct HeadsetCalibration {
     Vector3 cameraPosition;      // Camera position relative to eyes
