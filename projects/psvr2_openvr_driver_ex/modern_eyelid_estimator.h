@@ -4,6 +4,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <cmath>
 
 namespace psvr2_toolkit {
 
@@ -66,6 +67,9 @@ namespace psvr2_toolkit {
     
     // Convenience function for single eye (for A/B testing)
     EstimationResult Estimate(const EyeData& eye);
+    
+    // Convert from Hmd2GazeEye to EyeData (public for A/B testing)
+    EyeData ConvertFromHmd2Gaze(const Hmd2GazeEye& eye) const;
 
   private:
     // Adaptive learning with exponential moving averages
@@ -137,8 +141,6 @@ namespace psvr2_toolkit {
     float CalculateOverallConfidence(const std::vector<CueMeasurement>& cues);
     std::string DeterminePrimaryCue(const std::vector<CueMeasurement>& cues);
     
-    // Convert from Hmd2GazeEye to EyeData
-    EyeData ConvertFromHmd2Gaze(const Hmd2GazeEye& eye) const;
   };
 
 }
