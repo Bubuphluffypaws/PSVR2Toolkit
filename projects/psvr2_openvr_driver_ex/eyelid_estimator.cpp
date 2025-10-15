@@ -222,9 +222,8 @@ namespace psvr2_toolkit {
         // Use consistent gaze angle calculation with diameter correction
         float verticalAngle = CalculateVerticalGazeAngle(eye);
         
-        // Smooth transition: use squared angle for gentler falloff
-        float angleSquared = verticalAngle * verticalAngle;
-        gazeWeight = std::clamp(1.0f - angleSquared * gazeAngleCorrectionFactor, 
+        // Linear falloff instead of quadratic to prevent aggressive snapping
+        gazeWeight = std::clamp(1.0f - verticalAngle * gazeAngleCorrectionFactor, 
                                minGazeWeight, 1.0f);
       }
 

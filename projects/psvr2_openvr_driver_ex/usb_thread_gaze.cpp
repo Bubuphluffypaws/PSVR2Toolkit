@@ -3,6 +3,7 @@
 #include "hmd_driver_loader.h"
 #include "hmd_device_hooks.h"
 #include "eyelid_estimator.h"
+#include "modern_eyelid_estimator.h"
 #include "hmd2_gaze.h"
 #include "ipc_server.h"
 
@@ -30,8 +31,17 @@ int (*CaesarUsbThread__read)(void *thisptr, uint8_t pipeId, char *buffer, size_t
 
 CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 
-psvr2_toolkit::EyelidEstimator leftEyelidEstimator;
-psvr2_toolkit::EyelidEstimator rightEyelidEstimator;
+// A/B Testing Configuration
+// Set to true to use NEW implementation for both eyes
+// Set to false to use OLD implementation for both eyes  
+// Set to "A/B mode" to compare old (left) vs new (right)
+static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = false;
+static constexpr bool ENABLE_AB_TESTING = true;
+
+// Estimator instances
+psvr2_toolkit::EyelidEstimator leftEyelidEstimator;        // OLD implementation
+psvr2_toolkit::EyelidEstimator rightEyelidEstimatorOld;    // OLD implementation (backup)
+psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator; // NEW implementation
 
 void *j_CaesarUsbThreadGaze__dtor_CaesarUsbThreadGaze(CaesarUsbThreadGaze *thisptr, char a2) {
   thisptr->dtor_CaesarUsbThreadGaze();
@@ -137,8 +147,32 @@ int CaesarUsbThreadGaze::poll() {
   if (buffer[0] == GAZE_MAGIC_0 && buffer[1] == GAZE_MAGIC_1_STATE) {
     Hmd2GazeState *pGazeState = reinterpret_cast<Hmd2GazeState *>(buffer);
     HmdDeviceHooks::UpdateGaze(pGazeState, sizeof(Hmd2GazeState));
-    float leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
-    float rightEyelidOpenness = rightEyelidEstimator.Estimate(pGazeState->rightEye);
+    // Configurable A/B Testing Implementation
+    float leftEyelidOpenness, rightEyelidOpenness;
+    
+    if (ENABLE_AB_TESTING && !USE_NEW_IMPLEMENTATION_BOTH_EYES) {
+      // A/B Testing Mode: Old (left) vs New (right)
+      leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
+      
+      psvr2_toolkit::EyeData rightEyeData = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeData);
+      rightEyelidOpenness = rightResult.openness;
+    } else if (USE_NEW_IMPLEMENTATION_BOTH_EYES) {
+      // New Implementation for Both Eyes
+      psvr2_toolkit::EyeData leftEyeData = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EyeData rightEyeData = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      
+      psvr2_toolkit::EstimationResult leftResult = rightEyelidEstimator.Estimate(leftEyeData);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeData);
+      
+      leftEyelidOpenness = leftResult.openness;
+      rightEyelidOpenness = rightResult.openness;
+    } else {
+      // Old Implementation for Both Eyes (default)
+      leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
+      rightEyelidOpenness = rightEyelidEstimatorOld.Estimate(pGazeState->rightEye);
+    }
+    
     pIpcServer->UpdateGazeState(pGazeState, leftEyelidOpenness, rightEyelidOpenness);
   }
 
