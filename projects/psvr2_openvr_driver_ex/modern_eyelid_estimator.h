@@ -5,8 +5,15 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <algorithm>
 
 namespace psvr2_toolkit {
+
+  // Fallback clamp function for older C++ standards
+  template<typename T>
+  constexpr const T& clamp(const T& v, const T& lo, const T& hi) {
+    return (v < lo) ? lo : (hi < v) ? hi : v;
+  }
 
   struct Vector3 {
     float x, y, z;
@@ -138,7 +145,7 @@ namespace psvr2_toolkit {
         
         // Normalize to 0-1 range based on current baseline
         float normalized = (rawDiameter - (baselineDilation - dilationRange)) / (2.0f * dilationRange);
-        return std::clamp(normalized, 0.0f, 1.0f);
+        return clamp(normalized, 0.0f, 1.0f);
       }
       
       // Update baseline based on recent measurements
@@ -155,8 +162,8 @@ namespace psvr2_toolkit {
                        variance * adaptationRate;
         
         // Ensure reasonable bounds
-        baselineDilation = std::clamp(baselineDilation, 2.0f, 6.0f);
-        dilationRange = std::clamp(dilationRange, 0.5f, 2.0f);
+        baselineDilation = clamp(baselineDilation, 2.0f, 6.0f);
+        dilationRange = clamp(dilationRange, 0.5f, 2.0f);
       }
     } m_dilationNormalizer;
     
