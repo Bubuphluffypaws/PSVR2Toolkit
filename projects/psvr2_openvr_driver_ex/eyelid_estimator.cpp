@@ -185,22 +185,22 @@ namespace psvr2_toolkit {
       float gazeWeight = 1.0f;
       if (eye.isGazeDirValid) {
         float vertical = eye.gazeDirNorm.y; // +up, -down
-        // More aggressive reduction of diameter weight at non-neutral gaze
-        gazeWeight = std::clamp(1.0f - std::fabs(vertical) * gazeAngleCorrectionFactor, 
+        // Smooth transition: use squared vertical angle for gentler falloff
+        float verticalSquared = vertical * vertical;
+        gazeWeight = std::clamp(1.0f - verticalSquared * gazeAngleCorrectionFactor, 
                                minGazeWeight, 1.0f);
       }
 
-      // Dynamic weighting: increase position weight when gaze is non-neutral
+      // Smooth dynamic weighting: continuous transition between diameter and position cues
       float baseDiameterWeight = 0.65f;
       float basePositionWeight = 0.35f;
-      float positionBoost = (1.0f - gazeWeight) * positionWeightBoost;
       
-      float diameterWeight = baseDiameterWeight - positionBoost;
-      float positionWeight = basePositionWeight + positionBoost;
+      // Smooth interpolation between base weights and position-only
+      float diameterWeight = baseDiameterWeight * gazeWeight + 0.0f * (1.0f - gazeWeight);
+      float positionWeight = basePositionWeight * gazeWeight + 1.0f * (1.0f - gazeWeight);
 
-      // Combine cues with corrected diameter and enhanced weighting
-      opennessRaw = gazeWeight * (diameterWeight * normDia + positionWeight * normPos)
-        + (1.0f - gazeWeight) * normPos; // Use position only at extreme gaze angles
+      // Single, continuous calculation - no discontinuities
+      opennessRaw = diameterWeight * normDia + positionWeight * normPos;
     } else {
       // Missing data ? decay toward closed
       opennessRaw = m_lastOpenness * 0.9f;
