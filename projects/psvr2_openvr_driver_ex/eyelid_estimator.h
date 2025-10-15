@@ -24,6 +24,7 @@ namespace psvr2_toolkit {
 
     bool IsNeutral(const Hmd2GazeEye &eye) const;
     void UpdateLearnedNeutralGaze(const Hmd2GazeEye &eye);
+    float CalculateVerticalGazeAngle(const Hmd2GazeEye &eye) const;
   };
 
 }

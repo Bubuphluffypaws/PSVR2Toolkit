@@ -6,7 +6,7 @@
 namespace psvr2_toolkit {
 
   // parameters
-  static constexpr float openLR = 0.001f; // slow open adaptation
+  static constexpr float openLR = 0.005f; // balanced open adaptation (increased from 0.001f)
   static constexpr float closedLR = 0.01f;  // faster closed adaptation
   static constexpr float smoothAlpha = 0.2f;   // EMA smoothing
   
@@ -129,6 +129,16 @@ namespace psvr2_toolkit {
     }
   }
 
+  float EyelidEstimator::CalculateVerticalGazeAngle(const Hmd2GazeEye &eye) const {
+    if (eye.isGazeDirValid == HMD2_BOOL_FALSE) {
+      return 0.0f;
+    }
+    
+    // Calculate vertical gaze angle (up/down) consistently across all calculations
+    // Use absolute value since ellipticity occurs in both up and down directions
+    return std::asin(std::clamp(std::abs(eye.gazeDirNorm.y), 0.0f, 1.0f));
+  }
+
   float EyelidEstimator::Estimate(const Hmd2GazeEye &eye) {
     // Continuously learn the user's natural neutral gaze direction
     UpdateLearnedNeutralGaze(eye);
@@ -143,14 +153,36 @@ namespace psvr2_toolkit {
         m_sensorYClosed = m_sensorYClosed * (1.0f - closedLR) +
           eye.pupilPosInSensor.y * closedLR;
       }
-    } else if (eye.isPupilDiaValid && eye.isPupilPosInSensorValid && IsNeutral(eye)) {
-      // Update OPEN reference only if gaze is neutral
-      bool stable = std::fabs(eye.pupilDiaMm - m_openDia) < 1.0f;
+    } else if (eye.isPupilDiaValid && eye.isPupilPosInSensorValid) {
+      // Update OPEN reference with gaze-aware learning
+      // Allow updates at non-neutral gaze but with reduced learning rate
+      float currentLearningRate = openLR;
+      
+      // Reduce learning rate for non-neutral gaze to prevent bias
+      if (eye.isGazeDirValid && !IsNeutral(eye)) {
+        // Calculate gaze deviation from neutral
+        float gazeDeviation = 0.0f;
+        if (m_neutralGazeLearned) {
+          float dotProduct = eye.gazeDirNorm.x * m_learnedNeutralGaze.x + 
+                            eye.gazeDirNorm.y * m_learnedNeutralGaze.y + 
+                            eye.gazeDirNorm.z * m_learnedNeutralGaze.z;
+          gazeDeviation = 1.0f - std::clamp(dotProduct, 0.0f, 1.0f);
+        } else {
+          gazeDeviation = std::abs(eye.gazeDirNorm.y); // Use vertical deviation as fallback
+        }
+        
+        // Reduce learning rate based on gaze deviation
+        currentLearningRate *= std::clamp(1.0f - gazeDeviation * 2.0f, 0.1f, 1.0f);
+      }
+      
+      // More permissive stability check - allow normal pupil variation
+      bool stable = std::fabs(eye.pupilDiaMm - m_openDia) < 2.0f; // Increased from 1.0f to 2.0f
+      
       if (stable) {
-        m_openDia = m_openDia * (1.0f - openLR) +
-          eye.pupilDiaMm * openLR;
-        m_sensorYOpen = m_sensorYOpen * (1.0f - openLR) +
-          eye.pupilPosInSensor.y * openLR;
+        m_openDia = m_openDia * (1.0f - currentLearningRate) +
+          eye.pupilDiaMm * currentLearningRate;
+        m_sensorYOpen = m_sensorYOpen * (1.0f - currentLearningRate) +
+          eye.pupilPosInSensor.y * currentLearningRate;
       }
     }
 
@@ -161,10 +193,13 @@ namespace psvr2_toolkit {
       // Calculate gaze-dependent diameter correction to account for pupil ellipticity
       float correctedDia = eye.pupilDiaMm;
       if (eye.isGazeDirValid) {
-        // Calculate gaze angle from forward direction (z-component of gaze direction)
+        // Use consistent vertical gaze angle calculation
+        float verticalAngle = CalculateVerticalGazeAngle(eye);
+        
+        // Calculate correction factor based on cosine of vertical angle
         // Clamp to prevent division by very small values (safety bound)
-        float gazeDotProduct = std::clamp(eye.gazeDirNorm.z, minGazeDotProduct, 1.0f);
-        float correctionFactor = 1.0f / gazeDotProduct; // cos(angle) correction
+        float cosVertical = std::cos(verticalAngle);
+        float correctionFactor = 1.0f / std::clamp(cosVertical, minGazeDotProduct, 1.0f);
         
         // Apply correction with maximum bound to prevent unrealistic values
         correctionFactor = std::min(correctionFactor, maxDiameterCorrection);
@@ -184,10 +219,12 @@ namespace psvr2_toolkit {
       // Enhanced gaze-dependent weighting with hybrid approach
       float gazeWeight = 1.0f;
       if (eye.isGazeDirValid) {
-        float vertical = eye.gazeDirNorm.y; // +up, -down
-        // Smooth transition: use squared vertical angle for gentler falloff
-        float verticalSquared = vertical * vertical;
-        gazeWeight = std::clamp(1.0f - verticalSquared * gazeAngleCorrectionFactor, 
+        // Use consistent gaze angle calculation with diameter correction
+        float verticalAngle = CalculateVerticalGazeAngle(eye);
+        
+        // Smooth transition: use squared angle for gentler falloff
+        float angleSquared = verticalAngle * verticalAngle;
+        gazeWeight = std::clamp(1.0f - angleSquared * gazeAngleCorrectionFactor, 
                                minGazeWeight, 1.0f);
       }
 
