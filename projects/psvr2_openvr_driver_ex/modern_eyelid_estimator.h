@@ -82,6 +82,9 @@ namespace psvr2_toolkit {
     
     // Reset dilation normalizer (useful for new sessions)
     void ResetDilationNormalizer();
+    
+    // Reset blink tweener (useful for new sessions)
+    void ResetBlinkTweener();
 
   private:
     // Adaptive learning with exponential moving averages
@@ -166,6 +169,36 @@ namespace psvr2_toolkit {
     float m_neutralGazeConfidence;
     int m_gazeSampleCount;
     
+    // Blink detection and tweening system
+    struct BlinkTweener {
+      bool isBlinking = false;
+      bool wasBlinking = false;
+      float blinkStartTime = 0.0f;
+      float blinkDuration = 0.0f;
+      float preBlinkOpenness = 0.0f;
+      float blinkTarget = 0.0f;
+      
+      // Blink detection parameters
+      float blinkDetectionThreshold = 0.3f;   // Openness threshold to detect blink start
+      float blinkEndThreshold = 0.7f;         // Openness threshold to detect blink end
+      float minBlinkDuration = 0.05f;          // Minimum blink duration (50ms)
+      float maxBlinkDuration = 0.5f;           // Maximum blink duration (500ms)
+      
+      // Tweening parameters
+      float blinkCloseSpeed = 8.0f;            // Speed of closing during blink
+      float blinkOpenSpeed = 4.0f;             // Speed of opening after blink
+      float blinkOvershoot = 0.1f;             // Slight overshoot for natural feel
+      
+      // Update blink state and return tweened openness
+      float UpdateBlinkState(float currentOpenness, float deltaTime);
+      
+      // Check if we should override normal estimation
+      bool ShouldOverrideEstimation() const { return isBlinking || wasBlinking; }
+      
+      // Get current blink-influenced openness
+      float GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime);
+    } m_blinkTweener;
+    
     // Configuration
     struct Config {
       float minLearningRate = 0.001f;
@@ -175,6 +208,10 @@ namespace psvr2_toolkit {
       float smoothingAlpha = 0.1f;
       float minConfidence = 0.1f;
       bool invertOutput = true;  // Set to true if output is inverted
+      
+      // Blink augmentation parameters
+      bool enableBlinkAugmentation = true;     // Whether to use blink data for augmentation
+      float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
     } m_config;
     
     // Cue measurement functions

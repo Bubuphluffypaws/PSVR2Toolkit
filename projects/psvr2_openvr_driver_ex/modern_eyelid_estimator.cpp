@@ -72,6 +72,19 @@ namespace psvr2_toolkit {
     
     float openness = FuseCues(cues);
     
+    // Apply blink augmentation if enabled
+    if (m_config.enableBlinkAugmentation) {
+      // Use a small delta time for blink tweener (assuming ~60fps)
+      float deltaTime = 1.0f / 60.0f;
+      
+      // Update blink state and get blink-influenced openness
+      float blinkInfluencedOpenness = m_blinkTweener.UpdateBlinkState(openness, deltaTime);
+      
+      // Blend normal estimation with blink-influenced result
+      openness = openness * (1.0f - m_config.blinkOverrideStrength) + 
+                 blinkInfluencedOpenness * m_config.blinkOverrideStrength;
+    }
+    
     // Apply temporal smoothing
     static float lastOpenness = 0.5f;
     openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
@@ -293,6 +306,89 @@ namespace psvr2_toolkit {
 
   void ModernEyelidEstimator::ResetDilationNormalizer() {
     m_dilationNormalizer = PupilDilationNormalizer();
+  }
+
+  void ModernEyelidEstimator::ResetBlinkTweener() {
+    m_blinkTweener = BlinkTweener();
+  }
+
+  // BlinkTweener implementation
+  float ModernEyelidEstimator::BlinkTweener::UpdateBlinkState(float currentOpenness, float deltaTime) {
+    // Detect blink start
+    if (!isBlinking && !wasBlinking && currentOpenness < blinkDetectionThreshold) {
+      isBlinking = true;
+      blinkStartTime = 0.0f;
+      blinkDuration = 0.0f;
+      preBlinkOpenness = currentOpenness;
+      blinkTarget = 0.0f; // Close completely
+    }
+    
+    // Update blink timing
+    if (isBlinking) {
+      blinkStartTime += deltaTime;
+      blinkDuration += deltaTime;
+      
+      // Check for blink end conditions
+      if (blinkDuration > minBlinkDuration && currentOpenness > blinkEndThreshold) {
+        isBlinking = false;
+        wasBlinking = true;
+        blinkTarget = preBlinkOpenness; // Return to pre-blink state
+        blinkStartTime = 0.0f;
+      }
+      // Force end if blink is too long
+      else if (blinkDuration > maxBlinkDuration) {
+        isBlinking = false;
+        wasBlinking = true;
+        blinkTarget = preBlinkOpenness;
+        blinkStartTime = 0.0f;
+      }
+    }
+    
+    // Handle post-blink recovery
+    if (wasBlinking) {
+      blinkStartTime += deltaTime;
+      
+      // Check if we've recovered enough
+      if (currentOpenness > preBlinkOpenness * 0.9f) {
+        wasBlinking = false;
+        blinkStartTime = 0.0f;
+      }
+    }
+    
+    return GetBlinkInfluencedOpenness(currentOpenness, deltaTime);
+  }
+
+  float ModernEyelidEstimator::BlinkTweener::GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime) {
+    if (!isBlinking && !wasBlinking) {
+      return normalOpenness;
+    }
+    
+    float targetOpenness = normalOpenness;
+    
+    if (isBlinking) {
+      // During blink: smoothly close to target
+      float closeProgress = std::min(blinkStartTime * blinkCloseSpeed, 1.0f);
+      targetOpenness = preBlinkOpenness * (1.0f - closeProgress) + blinkTarget * closeProgress;
+      
+      // Add slight overshoot for natural feel
+      if (closeProgress > 0.8f) {
+        float overshootAmount = blinkOvershoot * (1.0f - closeProgress) / 0.2f;
+        targetOpenness = std::max(targetOpenness - overshootAmount, blinkTarget);
+      }
+    }
+    else if (wasBlinking) {
+      // Post-blink: smoothly return to normal
+      float recoveryProgress = std::min(blinkStartTime * blinkOpenSpeed, 1.0f);
+      targetOpenness = blinkTarget * (1.0f - recoveryProgress) + normalOpenness * recoveryProgress;
+      
+      // Add slight overshoot when opening
+      if (recoveryProgress < 0.3f) {
+        float overshootAmount = blinkOvershoot * (0.3f - recoveryProgress) / 0.3f;
+        targetOpenness = std::min(targetOpenness + overshootAmount, 1.0f);
+      }
+    }
+    
+    return targetOpenness;
   }
 
 }
