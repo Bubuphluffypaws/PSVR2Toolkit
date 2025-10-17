@@ -85,6 +85,9 @@ namespace psvr2_toolkit {
     
     // Reset blink tweener (useful for new sessions)
     void ResetBlinkTweener();
+    
+    // Reset eye geometry calibrator (useful for new sessions)
+    void ResetEyeGeometryCalibrator();
 
   private:
     // Adaptive learning with exponential moving averages
@@ -169,6 +172,77 @@ namespace psvr2_toolkit {
     float m_neutralGazeConfidence;
     int m_gazeSampleCount;
     
+    // Adaptive eye geometry calibration system
+    struct EyeGeometryCalibrator {
+      // Individual eye geometry parameters
+      struct EyeGeometry {
+        Vector3 pupilCenterOffset;        // Offset of pupil center from eye center
+        float eyeRadiusMm;                 // Estimated eye radius in mm
+        float eyelidCurvature;             // Eyelid curvature factor
+        float eyelidThickness;             // Eyelid thickness factor
+        Vector3 eyeCenter;                 // Estimated eye center position
+        bool isCalibrated;                 // Whether geometry is learned
+        
+        EyeGeometry() : pupilCenterOffset(0,0,0), eyeRadiusMm(12.0f), 
+                       eyelidCurvature(1.0f), eyelidThickness(1.0f),
+                       eyeCenter(0,0,0), isCalibrated(false) {}
+      } m_eyeGeometry;
+      
+      // Gaze-dependent eyelid behavior modeling
+      struct GazeDependentBehavior {
+        // Different squinting patterns for different gaze directions
+        float upGazeSquintFactor = 0.8f;      // Eyes squint more when looking up
+        float downGazeSquintFactor = 0.6f;     // Eyes squint less when looking down
+        float lateralGazeSquintFactor = 0.7f;  // Moderate squinting for lateral gaze
+        float neutralGazeSquintFactor = 1.0f;  // Baseline squinting
+        
+        // Learning parameters
+        float learningRate = 0.01f;            // How fast to learn gaze patterns
+        int minSamplesPerGaze = 50;            // Minimum samples before trusting pattern
+        std::map<int, float> learnedSquintFactors; // Learned squint factors per gaze bin
+        
+        // Update squint factor for specific gaze direction
+        void UpdateSquintFactor(float gazeAngle, float observedSquint);
+        
+        // Get squint factor for current gaze
+        float GetSquintFactor(float gazeAngle) const;
+      } m_gazeBehavior;
+      
+      // Pupil occlusion detection and compensation
+      struct PupilOcclusionDetector {
+        float occlusionThreshold = 0.3f;       // Threshold for detecting occlusion
+        float compensationStrength = 0.8f;     // How much to compensate for occlusion
+        bool isOccluded = false;               // Current occlusion state
+        float occlusionConfidence = 0.0f;      // Confidence in occlusion detection
+        
+        // Detect if pupil appears occluded due to gaze angle
+        bool DetectOcclusion(const EyeData& eye, const EyeGeometry& geometry);
+        
+        // Compensate openness for detected occlusion
+        float CompensateOpenness(float rawOpenness, float gazeAngle) const;
+      } m_occlusionDetector;
+      
+      // Calibration methods
+      void UpdateEyeGeometry(const EyeData& eye, const Vector3& gazeDir);
+      void UpdateGazeBehavior(const EyeData& eye, float openness);
+      bool IsGeometryCalibrated() const { return m_eyeGeometry.isCalibrated; }
+      
+      // Main calibration update
+      void UpdateCalibration(const EyeData& eye);
+      
+      // Get compensated openness
+      float GetCompensatedOpenness(float rawOpenness, const EyeData& eye);
+      
+      // Helper functions
+      Vector3 EstimatePupilOffset(const EyeData& eye);
+      float EstimateEyeRadius(const EyeData& eye);
+      float CalculateObservedSquint(const EyeData& eye, float openness);
+      Vector3 CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry);
+      float ApplySquintCompensation(float openness, float squintFactor);
+      float EstimateCurrentOpenness(const EyeData& eye);
+      float CalculateGazeAngle(const Vector3& gazeDir);
+    } m_eyeGeometryCalibrator;
+
     // Blink detection and tweening system
     struct BlinkTweener {
       bool isBlinking = false;
@@ -212,6 +286,12 @@ namespace psvr2_toolkit {
       // Blink augmentation parameters
       bool enableBlinkAugmentation = true;     // Whether to use blink data for augmentation
       float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
+      
+      // Eye geometry calibration parameters
+      bool enableEyeGeometryCalibration = true; // Whether to use adaptive eye geometry calibration
+      bool enableGazeDependentBehavior = true;   // Whether to model gaze-dependent eyelid behavior
+      bool enablePupilOcclusionCompensation = true; // Whether to compensate for pupil occlusion
+      float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)
     } m_config;
     
     // Cue measurement functions

@@ -40,7 +40,12 @@ namespace psvr2_toolkit {
     // 3. Fuse all cues using uncertainty weighting
     float openness = FuseCues(allCues);
     
-    // 4. Apply temporal smoothing
+    // 4. Direct blink override (like old algorithm)
+    if (leftEye.isBlink || rightEye.isBlink) {
+      openness = 0.0f; // Immediate eye closure on any blink
+    }
+    
+    // 5. Apply temporal smoothing
     static float lastOpenness = 0.5f;
     openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
                openness * m_config.smoothingAlpha;
@@ -71,6 +76,21 @@ namespace psvr2_toolkit {
     }
     
     float openness = FuseCues(cues);
+    
+    // Update eye geometry calibration
+    if (m_config.enableEyeGeometryCalibration) {
+      m_eyeGeometryCalibrator.UpdateCalibration(eye);
+    }
+    
+    // Apply eye geometry compensation
+    if (m_config.enableEyeGeometryCalibration && m_eyeGeometryCalibrator.IsGeometryCalibrated()) {
+      openness = m_eyeGeometryCalibrator.GetCompensatedOpenness(openness, eye);
+    }
+    
+    // Direct blink override (like old algorithm)
+    if (eye.isBlink) {
+      openness = 0.0f; // Immediate eye closure on blink
+    }
     
     // Apply blink augmentation if enabled
     if (m_config.enableBlinkAugmentation) {
@@ -310,6 +330,192 @@ namespace psvr2_toolkit {
 
   void ModernEyelidEstimator::ResetBlinkTweener() {
     m_blinkTweener = BlinkTweener();
+  }
+
+  void ModernEyelidEstimator::ResetEyeGeometryCalibrator() {
+    m_eyeGeometryCalibrator = EyeGeometryCalibrator();
+  }
+
+  // EyeGeometryCalibrator implementation
+  void ModernEyelidEstimator::EyeGeometryCalibrator::UpdateCalibration(const EyeData& eye) {
+    if (!eye.isValid) return;
+    
+    // Update eye geometry
+    UpdateEyeGeometry(eye, eye.gazeDir);
+    
+    // Update gaze-dependent behavior
+    float currentOpenness = EstimateCurrentOpenness(eye);
+    UpdateGazeBehavior(eye, currentOpenness);
+  }
+
+  void ModernEyelidEstimator::EyeGeometryCalibrator::UpdateEyeGeometry(const EyeData& eye, const Vector3& gazeDir) {
+    // Learn individual eye geometry parameters
+    static int sampleCount = 0;
+    sampleCount++;
+    
+    // Estimate pupil center offset from gaze direction
+    // When looking straight ahead, pupil should be centered
+    if (gazeDir.z > 0.95f) { // Near neutral gaze
+      // Learn pupil center offset
+      Vector3 currentOffset = EstimatePupilOffset(eye);
+      m_eyeGeometry.pupilCenterOffset = m_eyeGeometry.pupilCenterOffset * 0.95f + 
+                                       currentOffset * 0.05f;
+    }
+    
+    // Learn eye radius from pupil diameter and position
+    if (eye.pupilDiaMm > 0) {
+      float estimatedRadius = EstimateEyeRadius(eye);
+      m_eyeGeometry.eyeRadiusMm = m_eyeGeometry.eyeRadiusMm * 0.98f + 
+                                 estimatedRadius * 0.02f;
+    }
+    
+    // Mark as calibrated after sufficient samples
+    if (sampleCount > 100) {
+      m_eyeGeometry.isCalibrated = true;
+    }
+  }
+
+  void ModernEyelidEstimator::EyeGeometryCalibrator::UpdateGazeBehavior(const EyeData& eye, float openness) {
+    if (!eye.isValid) return;
+    
+    // Calculate gaze angle
+    float gazeAngle = CalculateGazeAngle(eye.gazeDir);
+    int gazeBin = static_cast<int>(gazeAngle * 10.0f); // 10-degree bins
+    
+    // Learn squint patterns for different gaze directions
+    float observedSquint = CalculateObservedSquint(eye, openness);
+    m_gazeBehavior.UpdateSquintFactor(gazeBin, observedSquint);
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::GetCompensatedOpenness(float rawOpenness, const EyeData& eye) {
+    float compensatedOpenness = rawOpenness;
+    
+    // Apply pupil occlusion compensation
+    if (m_occlusionDetector.DetectOcclusion(eye, m_eyeGeometry)) {
+      float gazeAngle = CalculateGazeAngle(eye.gazeDir);
+      compensatedOpenness = m_occlusionDetector.CompensateOpenness(compensatedOpenness, gazeAngle);
+    }
+    
+    // Apply gaze-dependent behavior compensation
+    if (m_gazeBehavior.learnedSquintFactors.size() > 0) {
+      float gazeAngle = CalculateGazeAngle(eye.gazeDir);
+      float squintFactor = m_gazeBehavior.GetSquintFactor(gazeAngle);
+      compensatedOpenness = ApplySquintCompensation(compensatedOpenness, squintFactor);
+    }
+    
+    return compensatedOpenness;
+  }
+
+  // GazeDependentBehavior implementation
+  void ModernEyelidEstimator::EyeGeometryCalibrator::GazeDependentBehavior::UpdateSquintFactor(float gazeAngle, float observedSquint) {
+    int gazeBin = static_cast<int>(gazeAngle * 10.0f);
+    
+    // Initialize if not present
+    if (learnedSquintFactors.find(gazeBin) == learnedSquintFactors.end()) {
+      learnedSquintFactors[gazeBin] = 1.0f; // Start with neutral factor
+    }
+    
+    // Update learned squint factor
+    float currentFactor = learnedSquintFactors[gazeBin];
+    float newFactor = currentFactor * (1.0f - learningRate) + observedSquint * learningRate;
+    learnedSquintFactors[gazeBin] = std::clamp(newFactor, 0.1f, 2.0f);
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::GazeDependentBehavior::GetSquintFactor(float gazeAngle) const {
+    int gazeBin = static_cast<int>(gazeAngle * 10.0f);
+    
+    // Return learned factor if available
+    auto it = learnedSquintFactors.find(gazeBin);
+    if (it != learnedSquintFactors.end()) {
+      return it->second;
+    }
+    
+    // Fallback to directional factors
+    if (gazeAngle > 0.3f) { // Looking up
+      return upGazeSquintFactor;
+    } else if (gazeAngle < -0.3f) { // Looking down
+      return downGazeSquintFactor;
+    } else if (std::abs(gazeAngle) < 0.1f) { // Neutral
+      return neutralGazeSquintFactor;
+    } else { // Lateral
+      return lateralGazeSquintFactor;
+    }
+  }
+
+  // PupilOcclusionDetector implementation
+  bool ModernEyelidEstimator::EyeGeometryCalibrator::PupilOcclusionDetector::DetectOcclusion(const EyeData& eye, const EyeGeometry& geometry) {
+    if (!geometry.isCalibrated) return false;
+    
+    // Calculate expected pupil position based on gaze
+    Vector3 expectedPupilPos = CalculateExpectedPupilPosition(eye.gazeDir, geometry);
+    Vector3 actualPupilPos = Vector3(0, eye.pupilPosY, 0); // Simplified 2D position
+    
+    // Calculate displacement
+    float displacement = (expectedPupilPos - actualPupilPos).Magnitude();
+    
+    // Detect occlusion if displacement exceeds threshold
+    isOccluded = displacement > occlusionThreshold;
+    occlusionConfidence = std::min(displacement / occlusionThreshold, 1.0f);
+    
+    return isOccluded;
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::PupilOcclusionDetector::CompensateOpenness(float rawOpenness, float gazeAngle) const {
+    if (!isOccluded) return rawOpenness;
+    
+    // Compensate for false closure due to pupil occlusion
+    float compensationFactor = 1.0f + (occlusionConfidence * compensationStrength);
+    float compensatedOpenness = rawOpenness * compensationFactor;
+    
+    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
+  }
+
+  // Helper functions for eye geometry calibration
+  Vector3 ModernEyelidEstimator::EyeGeometryCalibrator::EstimatePupilOffset(const EyeData& eye) {
+    // Estimate pupil center offset from sensor position
+    // This is a simplified estimation - in reality would need more sophisticated analysis
+    return Vector3(0, eye.pupilPosY - 0.5f, 0); // Assume center is at 0.5
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::EstimateEyeRadius(const EyeData& eye) {
+    // Estimate eye radius from pupil diameter and position
+    // Typical eye radius is 12mm, pupil diameter varies 2-8mm
+    float estimatedRadius = eye.pupilDiaMm * 3.0f; // Rough estimation
+    return std::clamp(estimatedRadius, 8.0f, 16.0f);
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateObservedSquint(const EyeData& eye, float openness) {
+    // Calculate observed squint based on pupil dynamics
+    // When squinting, pupil appears smaller and position changes
+    float squintIndicator = 1.0f - (eye.pupilDiaMm / 4.0f); // Normalize to 0-1
+    return std::clamp(squintIndicator, 0.0f, 1.0f);
+  }
+
+  Vector3 ModernEyelidEstimator::EyeGeometryCalibrator::CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry) {
+    // Calculate where pupil should be based on gaze direction and eye geometry
+    // This is a simplified model - real implementation would be more complex
+    Vector3 expectedPos = geometry.eyeCenter + gazeDir * geometry.eyeRadiusMm;
+    return expectedPos;
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::ApplySquintCompensation(float openness, float squintFactor) {
+    // Apply squint compensation to openness
+    // Higher squint factor means more squinting, so openness should be reduced
+    float compensatedOpenness = openness / squintFactor;
+    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::EstimateCurrentOpenness(const EyeData& eye) {
+    // Estimate current openness for learning purposes
+    // This is a simplified estimation - would use actual measurement in real implementation
+    float diameterOpenness = std::clamp(eye.pupilDiaMm / 4.0f, 0.0f, 1.0f);
+    float positionOpenness = std::clamp(eye.pupilPosY, 0.0f, 1.0f);
+    return (diameterOpenness + positionOpenness) * 0.5f;
+  }
+
+  float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateGazeAngle(const Vector3& gazeDir) {
+    // Calculate vertical gaze angle
+    return std::asin(std::clamp(std::abs(gazeDir.y), 0.0f, 1.0f));
   }
 
   // BlinkTweener implementation
