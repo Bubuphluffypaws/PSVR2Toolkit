@@ -281,7 +281,7 @@ namespace psvr2_toolkit {
     
     // Low-pass filter for temporal smoothing
     struct LowPassFilter {
-      float alpha = 0.15f;                     // Filter coefficient (0.1 = more smoothing, 0.9 = less smoothing)
+      float alpha = 0.08f;                     // Filter coefficient (0.1 = more smoothing, 0.9 = less smoothing) - Increased smoothing
       float lastValue = 0.5f;
       bool initialized = false;
       
@@ -309,7 +309,7 @@ namespace psvr2_toolkit {
       int gazeAngleBins = 10;  // Number of angle-specific reference bins
       float smoothingAlpha = 0.1f;
       float minConfidence = 0.1f;
-      bool invertOutput = true;  // Set to true if output is inverted
+      bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
       
       // Blink augmentation parameters
       bool enableBlinkAugmentation = true;     // Whether to use blink data for augmentation
