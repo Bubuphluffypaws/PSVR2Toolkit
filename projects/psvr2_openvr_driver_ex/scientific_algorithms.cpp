@@ -7,6 +7,8 @@ namespace psvr2_toolkit {
 
   // PMC6960643 Feature-Based Estimator Implementation
   // Based on: "Eye Tracking: A Comprehensive Guide to Methods and Measures"
+  // COMMENTED OUT - Requires image data not available
+  /*
   PMC6960643_FeatureBasedEstimator::PMC6960643_FeatureBasedEstimator() 
     : m_isCalibrated(false), m_sampleCount(0), m_confidence(0.0f) {
     m_gaborDetector.InitializeFilters();
@@ -149,9 +151,12 @@ namespace psvr2_toolkit {
     // Update or create template for this gaze angle
     learnedTemplates[gazeAngle] = {openness}; // Simplified template
   }
+  */
 
   // Frontiers2019 Deformable Shape Estimator Implementation
   // Based on: "Deformable Shape Models for Eye Tracking"
+  // COMMENTED OUT - Requires image data and landmark detection not available
+  /*
   Frontiers2019_DeformableShapeEstimator::Frontiers2019_DeformableShapeEstimator() 
     : m_isCalibrated(false), m_sampleCount(0), m_confidence(0.0f) {
     m_currentModel.isValid = false;
@@ -305,6 +310,7 @@ namespace psvr2_toolkit {
     
     return visibleCount >= landmarks.size() / 2;
   }
+  */
 
   // PMC8018226 Model-Based Estimator Implementation
   // Based on: "Model-Based Eye Image Analysis for Facial Expression Recognition"
@@ -436,6 +442,8 @@ namespace psvr2_toolkit {
 
   // Springer2024 ML-Based Estimator Implementation
   // Based on: "Deep Learning for Eye Tracking" + "Machine Learning for Eye Movement Classification"
+  // COMMENTED OUT - Requires ML model training and more complex implementation
+  /*
   Springer2024_MLBasedEstimator::Springer2024_MLBasedEstimator() 
     : m_isCalibrated(false), m_sampleCount(0), m_confidence(0.0f), 
       m_useCNN(true), m_useSVM(true) {
@@ -560,6 +568,8 @@ namespace psvr2_toolkit {
 
   // Hybrid Scientific Estimator Implementation
   // Combines: PMC6960643 + Frontiers2019 + PMC8018226 + Springer2024
+  // COMMENTED OUT - Only works when other algorithms are enabled
+  /*
   HybridScientificEstimator::HybridScientificEstimator() {
     // Initialize all estimators
     m_estimators["pmc6960643_feature"] = {std::make_unique<PMC6960643_FeatureBasedEstimator>(), true, 0.2f, 0.0f};
@@ -720,16 +730,18 @@ namespace psvr2_toolkit {
       return values[n/2];
     }
   }
+  */
 
   // Scientific Algorithm Manager Implementation
   ScientificAlgorithmManager::ScientificAlgorithmManager() {
-    m_enabledMethods["pmc6960643_feature"] = true;
-    m_enabledMethods["frontiers2019_deformable"] = true;
+    // Only enable the most feasible algorithm
     m_enabledMethods["pmc8018226_model"] = true;
-    m_enabledMethods["springer2024_ml"] = true;
-    m_enabledMethods["hybrid_scientific"] = true;
+    // m_enabledMethods["pmc6960643_feature"] = false;
+    // m_enabledMethods["frontiers2019_deformable"] = false;
+    // m_enabledMethods["springer2024_ml"] = false;
+    // m_enabledMethods["hybrid_scientific"] = false;
     
-    m_primaryMethod = "hybrid_scientific";
+    m_primaryMethod = "pmc8018226_model";
   }
 
   void ScientificAlgorithmManager::EnableAlgorithm(const std::string& name, bool enabled) {
@@ -745,52 +757,57 @@ namespace psvr2_toolkit {
   }
 
   float ScientificAlgorithmManager::EstimateOpenness(const EyeData& eye, const std::string& method) {
-    if (method == "pmc6960643_feature") {
-      return m_pmc6960643_featureBased.EstimateOpenness(eye);
-    } else if (method == "frontiers2019_deformable") {
-      return m_frontiers2019_deformableShape.EstimateOpenness(eye);
-    } else if (method == "pmc8018226_model") {
+    if (method == "pmc8018226_model") {
       return m_pmc8018226_modelBased.EstimateOpenness(eye);
-    } else if (method == "springer2024_ml") {
-      return m_springer2024_mlBased.EstimateOpenness(eye);
-    } else if (method == "hybrid_scientific") {
-      return m_hybridScientific.EstimateOpenness(eye);
     }
+    // if (method == "pmc6960643_feature") {
+    //   return m_pmc6960643_featureBased.EstimateOpenness(eye);
+    // } else if (method == "frontiers2019_deformable") {
+    //   return m_frontiers2019_deformableShape.EstimateOpenness(eye);
+    // } else if (method == "springer2024_ml") {
+    //   return m_springer2024_mlBased.EstimateOpenness(eye);
+    // } else if (method == "hybrid_scientific") {
+    //   return m_hybridScientific.EstimateOpenness(eye);
+    // }
     
-    return m_hybridScientific.EstimateOpenness(eye); // Default to hybrid
+    return m_pmc8018226_modelBased.EstimateOpenness(eye); // Default to model-based
   }
 
   void ScientificAlgorithmManager::UpdateLearning(const EyeData& eye, float groundTruth) {
-    m_pmc6960643_featureBased.UpdateLearning(eye, groundTruth);
-    m_frontiers2019_deformableShape.UpdateLearning(eye, groundTruth);
     m_pmc8018226_modelBased.UpdateLearning(eye, groundTruth);
-    m_springer2024_mlBased.UpdateLearning(eye, groundTruth);
-    m_hybridScientific.UpdateLearning(eye, groundTruth);
+    // m_pmc6960643_featureBased.UpdateLearning(eye, groundTruth);
+    // m_frontiers2019_deformableShape.UpdateLearning(eye, groundTruth);
+    // m_springer2024_mlBased.UpdateLearning(eye, groundTruth);
+    // m_hybridScientific.UpdateLearning(eye, groundTruth);
   }
 
   void ScientificAlgorithmManager::ResetAll() {
-    m_pmc6960643_featureBased.Reset();
-    m_frontiers2019_deformableShape.Reset();
     m_pmc8018226_modelBased.Reset();
-    m_springer2024_mlBased.Reset();
-    m_hybridScientific.Reset();
+    // m_pmc6960643_featureBased.Reset();
+    // m_frontiers2019_deformableShape.Reset();
+    // m_springer2024_mlBased.Reset();
+    // m_hybridScientific.Reset();
   }
 
   std::vector<std::string> ScientificAlgorithmManager::GetAvailableMethods() const {
-    return {"pmc6960643_feature", "frontiers2019_deformable", "pmc8018226_model", "springer2024_ml", "hybrid_scientific"};
+    return {"pmc8018226_model"};
+    // return {"pmc6960643_feature", "frontiers2019_deformable", "pmc8018226_model", "springer2024_ml", "hybrid_scientific"};
   }
 
   std::map<std::string, float> ScientificAlgorithmManager::GetMethodConfidences() const {
     std::map<std::string, float> confidences;
-    confidences["pmc6960643_feature"] = m_pmc6960643_featureBased.GetConfidence();
-    confidences["frontiers2019_deformable"] = m_frontiers2019_deformableShape.GetConfidence();
     confidences["pmc8018226_model"] = m_pmc8018226_modelBased.GetConfidence();
-    confidences["springer2024_ml"] = m_springer2024_mlBased.GetConfidence();
-    confidences["hybrid_scientific"] = m_hybridScientific.GetConfidence();
+    // confidences["pmc6960643_feature"] = m_pmc6960643_featureBased.GetConfidence();
+    // confidences["frontiers2019_deformable"] = m_frontiers2019_deformableShape.GetConfidence();
+    // confidences["pmc8018226_model"] = m_pmc8018226_modelBased.GetConfidence();
+    // confidences["springer2024_ml"] = m_springer2024_mlBased.GetConfidence();
+    // confidences["hybrid_scientific"] = m_hybridScientific.GetConfidence();
     return confidences;
   }
 
   // Helper functions (simplified implementations)
+  // COMMENTED OUT - Only keeping PMC8018226 helper functions
+  /*
   float PMC6960643_FeatureBasedEstimator::CalculateConfidence(const EyeFeatureDetector::EyeFeatures& features, float edgeStrength) {
     return (features.irisVisibility + edgeStrength + features.eyelidContour) / 3.0f;
   }
@@ -816,15 +833,6 @@ namespace psvr2_toolkit {
     // Simplified implementation
   }
 
-  float PMC8018226_ModelBasedEstimator::CalculateModelConfidence(const EyeRegionModel& model) {
-    return model.isValid ? 0.8f : 0.0f;
-  }
-
-  void PMC8018226_ModelBasedEstimator::UpdateModelParameters(EyeRegionModel& model, float groundTruth) {
-    // Update model parameters based on ground truth
-    // Simplified implementation
-  }
-
   float Springer2024_MLBasedEstimator::CalculateMLConfidence(const EyeData& eye) {
     return 0.7f; // Simplified confidence calculation
   }
@@ -833,5 +841,6 @@ namespace psvr2_toolkit {
     // Update ML models with ground truth data
     // Simplified implementation
   }
+  */
 
 }

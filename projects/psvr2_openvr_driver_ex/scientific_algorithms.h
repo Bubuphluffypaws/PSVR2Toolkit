@@ -8,11 +8,11 @@
 namespace psvr2_toolkit {
 
   // Forward declarations for all scientific algorithm modules
-  class PMC6960643_FeatureBasedEstimator;      // "Eye Tracking: A Comprehensive Guide to Methods and Measures"
-  class Frontiers2019_DeformableShapeEstimator; // "Deformable Shape Models for Eye Tracking"
+  // class PMC6960643_FeatureBasedEstimator;      // "Eye Tracking: A Comprehensive Guide to Methods and Measures"
+  // class Frontiers2019_DeformableShapeEstimator; // "Deformable Shape Models for Eye Tracking"
   class PMC8018226_ModelBasedEstimator;        // "Model-Based Eye Image Analysis for Facial Expression Recognition"
-  class Springer2024_MLBasedEstimator;         // "Deep Learning for Eye Tracking"
-  class HybridScientificEstimator;              // Combines all methods
+  // class Springer2024_MLBasedEstimator;         // "Deep Learning for Eye Tracking"
+  // class HybridScientificEstimator;              // Combines all methods
 
   // Base class for all scientific estimators
   class ScientificEstimator {
@@ -28,6 +28,8 @@ namespace psvr2_toolkit {
 
   // Feature-Based Techniques (Gabor filters, template matching)
   // Based on: PMC6960643 - "Eye Tracking: A Comprehensive Guide to Methods and Measures"
+  // COMMENTED OUT - Requires image data not available
+  /*
   class PMC6960643_FeatureBasedEstimator : public ScientificEstimator {
   public:
     PMC6960643_FeatureBasedEstimator();
@@ -70,9 +72,12 @@ namespace psvr2_toolkit {
     int m_sampleCount;
     float m_confidence;
   };
+  */
 
   // Deformable Shape Models (landmark detection, shape fitting)
   // Based on: Frontiers2019 - "Deformable Shape Models for Eye Tracking"
+  // COMMENTED OUT - Requires image data and landmark detection not available
+  /*
   class Frontiers2019_DeformableShapeEstimator : public ScientificEstimator {
   public:
     Frontiers2019_DeformableShapeEstimator();
@@ -118,6 +123,7 @@ namespace psvr2_toolkit {
     int m_sampleCount;
     float m_confidence;
   };
+  */
 
   // Model-Based Analysis (eye region modeling, registration)
   // Based on: PMC8018226 - "Model-Based Eye Image Analysis for Facial Expression Recognition"
@@ -167,6 +173,8 @@ namespace psvr2_toolkit {
 
   // Machine Learning-Based Estimators (CNN, SVM)
   // Based on: Springer2024 - "Deep Learning for Eye Tracking" + MDPI2024 - "Machine Learning for Eye Movement Classification"
+  // COMMENTED OUT - Requires ML model training and more complex implementation
+  /*
   class Springer2024_MLBasedEstimator : public ScientificEstimator {
   public:
     Springer2024_MLBasedEstimator();
@@ -221,9 +229,12 @@ namespace psvr2_toolkit {
     bool m_useCNN;
     bool m_useSVM;
   };
+  */
 
   // Hybrid Estimator (combines all methods)
   // Combines: PMC6960643 + Frontiers2019 + PMC8018226 + Springer2024
+  // COMMENTED OUT - Only works when other algorithms are enabled
+  /*
   class HybridScientificEstimator : public ScientificEstimator {
   public:
     HybridScientificEstimator();
@@ -257,6 +268,7 @@ namespace psvr2_toolkit {
     float UncertaintyFusion(const std::map<std::string, float>& estimates);
     float VotingFusion(const std::map<std::string, float>& estimates);
   };
+  */
 
   // Scientific Algorithm Manager (handles all modules)
   class ScientificAlgorithmManager {
@@ -265,11 +277,11 @@ namespace psvr2_toolkit {
     ~ScientificAlgorithmManager() = default;
 
     // Individual estimator access
-    PMC6960643_FeatureBasedEstimator& GetPMC6960643_FeatureBasedEstimator() { return m_pmc6960643_featureBased; }
-    Frontiers2019_DeformableShapeEstimator& GetFrontiers2019_DeformableShapeEstimator() { return m_frontiers2019_deformableShape; }
+    // PMC6960643_FeatureBasedEstimator& GetPMC6960643_FeatureBasedEstimator() { return m_pmc6960643_featureBased; }
+    // Frontiers2019_DeformableShapeEstimator& GetFrontiers2019_DeformableShapeEstimator() { return m_frontiers2019_deformableShape; }
     PMC8018226_ModelBasedEstimator& GetPMC8018226_ModelBasedEstimator() { return m_pmc8018226_modelBased; }
-    Springer2024_MLBasedEstimator& GetSpringer2024_MLBasedEstimator() { return m_springer2024_mlBased; }
-    HybridScientificEstimator& GetHybridScientificEstimator() { return m_hybridScientific; }
+    // Springer2024_MLBasedEstimator& GetSpringer2024_MLBasedEstimator() { return m_springer2024_mlBased; }
+    // HybridScientificEstimator& GetHybridScientificEstimator() { return m_hybridScientific; }
 
     // Configuration
     void EnableAlgorithm(const std::string& name, bool enabled);
@@ -284,11 +296,11 @@ namespace psvr2_toolkit {
     std::map<std::string, float> GetMethodConfidences() const;
 
   private:
-    PMC6960643_FeatureBasedEstimator m_pmc6960643_featureBased;
-    Frontiers2019_DeformableShapeEstimator m_frontiers2019_deformableShape;
+    // PMC6960643_FeatureBasedEstimator m_pmc6960643_featureBased;
+    // Frontiers2019_DeformableShapeEstimator m_frontiers2019_deformableShape;
     PMC8018226_ModelBasedEstimator m_pmc8018226_modelBased;
-    Springer2024_MLBasedEstimator m_springer2024_mlBased;
-    HybridScientificEstimator m_hybridScientific;
+    // Springer2024_MLBasedEstimator m_springer2024_mlBased;
+    // HybridScientificEstimator m_hybridScientific;
 
     std::map<std::string, bool> m_enabledMethods;
     std::string m_primaryMethod;

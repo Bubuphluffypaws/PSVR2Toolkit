@@ -9,11 +9,11 @@ namespace psvr2_toolkit {
   namespace ScientificAlgorithms {
     
     // Individual algorithm toggles
-    static constexpr bool ENABLE_PMC6960643_FEATURE_BASED = false;        // "Eye Tracking: A Comprehensive Guide to Methods and Measures"
-    static constexpr bool ENABLE_FRONTIERS2019_DEFORMABLE_SHAPE = false;  // "Deformable Shape Models for Eye Tracking"
-    static constexpr bool ENABLE_PMC8018226_MODEL_BASED = false;          // "Model-Based Eye Image Analysis for Facial Expression Recognition"
-    static constexpr bool ENABLE_SPRINGER2024_ML_BASED = false;           // "Deep Learning for Eye Tracking" + "Machine Learning for Eye Movement Classification"
-    static constexpr bool ENABLE_HYBRID_SCIENTIFIC = false;               // Combines all methods
+    static constexpr bool ENABLE_PMC6960643_FEATURE_BASED = false;        // "Eye Tracking: A Comprehensive Guide to Methods and Measures" - COMMENTED OUT
+    static constexpr bool ENABLE_FRONTIERS2019_DEFORMABLE_SHAPE = false;  // "Deformable Shape Models for Eye Tracking" - COMMENTED OUT
+    static constexpr bool ENABLE_PMC8018226_MODEL_BASED = true;           // "Model-Based Eye Image Analysis for Facial Expression Recognition" - ONLY ENABLED
+    static constexpr bool ENABLE_SPRINGER2024_ML_BASED = false;           // "Deep Learning for Eye Tracking" + "Machine Learning for Eye Movement Classification" - COMMENTED OUT
+    static constexpr bool ENABLE_HYBRID_SCIENTIFIC = false;               // Combines all methods - COMMENTED OUT
     
     // Fusion method selection (when hybrid is enabled)
     enum class FusionMethod {
