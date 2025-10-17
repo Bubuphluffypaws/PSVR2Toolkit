@@ -7,6 +7,12 @@
 
 namespace psvr2_toolkit {
 
+  // Simple 2D vector for scientific algorithms
+  struct Vector2 {
+    float x, y;
+    Vector2(float x = 0, float y = 0) : x(x), y(y) {}
+  };
+
   // Forward declarations for all scientific algorithm modules
   // class PMC6960643_FeatureBasedEstimator;      // "Eye Tracking: A Comprehensive Guide to Methods and Measures"
   // class Frontiers2019_DeformableShapeEstimator; // "Deformable Shape Models for Eye Tracking"

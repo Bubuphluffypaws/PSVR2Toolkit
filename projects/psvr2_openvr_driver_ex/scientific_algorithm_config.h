@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // Scientific Algorithm Configuration
 // Enable/disable individual algorithms for testing and comparison
 

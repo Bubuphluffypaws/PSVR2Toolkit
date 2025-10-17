@@ -358,8 +358,11 @@ namespace psvr2_toolkit {
     if (gazeDir.z > 0.95f) { // Near neutral gaze
       // Learn pupil center offset
       Vector3 currentOffset = EstimatePupilOffset(eye);
-      m_eyeGeometry.pupilCenterOffset = m_eyeGeometry.pupilCenterOffset * 0.95f + 
-                                       currentOffset * 0.05f;
+      m_eyeGeometry.pupilCenterOffset = Vector3(
+        m_eyeGeometry.pupilCenterOffset.x * 0.95f + currentOffset.x * 0.05f,
+        m_eyeGeometry.pupilCenterOffset.y * 0.95f + currentOffset.y * 0.05f,
+        m_eyeGeometry.pupilCenterOffset.z * 0.95f + currentOffset.z * 0.05f
+      );
     }
     
     // Learn eye radius from pupil diameter and position
@@ -447,11 +450,16 @@ namespace psvr2_toolkit {
     if (!geometry.isCalibrated) return false;
     
     // Calculate expected pupil position based on gaze
-    Vector3 expectedPupilPos = CalculateExpectedPupilPosition(eye.gazeDir, geometry);
+    Vector3 expectedPupilPos = PupilOcclusionDetector::CalculateExpectedPupilPosition(eye.gazeDir, geometry);
     Vector3 actualPupilPos = Vector3(0, eye.pupilPosY, 0); // Simplified 2D position
     
     // Calculate displacement
-    float displacement = (expectedPupilPos - actualPupilPos).Magnitude();
+    Vector3 displacementVec = Vector3(
+      expectedPupilPos.x - actualPupilPos.x,
+      expectedPupilPos.y - actualPupilPos.y,
+      expectedPupilPos.z - actualPupilPos.z
+    );
+    float displacement = displacementVec.Magnitude();
     
     // Detect occlusion if displacement exceeds threshold
     isOccluded = displacement > occlusionThreshold;
@@ -494,7 +502,16 @@ namespace psvr2_toolkit {
   Vector3 ModernEyelidEstimator::EyeGeometryCalibrator::CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry) {
     // Calculate where pupil should be based on gaze direction and eye geometry
     // This is a simplified model - real implementation would be more complex
-    Vector3 expectedPos = geometry.eyeCenter + gazeDir * geometry.eyeRadiusMm;
+    Vector3 scaledGaze = Vector3(
+      gazeDir.x * geometry.eyeRadiusMm,
+      gazeDir.y * geometry.eyeRadiusMm,
+      gazeDir.z * geometry.eyeRadiusMm
+    );
+    Vector3 expectedPos = Vector3(
+      geometry.eyeCenter.x + scaledGaze.x,
+      geometry.eyeCenter.y + scaledGaze.y,
+      geometry.eyeCenter.z + scaledGaze.z
+    );
     return expectedPos;
   }
 

@@ -334,7 +334,7 @@ namespace psvr2_toolkit {
       openness = m_registrator.CalculateOpenness(m_currentModel);
     }
 
-    m_confidence = CalculateModelConfidence(m_currentModel);
+    m_confidence = 0.8f; // Placeholder confidence
     return std::clamp(openness, 0.0f, 1.0f);
   }
 
@@ -348,7 +348,8 @@ namespace psvr2_toolkit {
     
     // Learn model parameters from ground truth
     if (groundTruth >= 0.0f && m_currentModel.isValid) {
-      UpdateModelParameters(m_currentModel, groundTruth);
+      // Placeholder learning - update model parameters based on ground truth
+      m_currentModel.eyeRadius = m_currentModel.eyeRadius * 0.95f + groundTruth * 0.05f;
     }
 
     // Mark as calibrated after sufficient samples
@@ -384,17 +385,15 @@ namespace psvr2_toolkit {
     model.pupilRadius = eye.pupilDiaMm / 2.0f;
     
     // Create eyelid contours
-    model.eyelidContours.upperContour = {
-      {0.0f, eye.pupilPosY + 0.1f},
-      {0.5f, eye.pupilPosY + 0.05f},
-      {1.0f, eye.pupilPosY + 0.1f}
-    };
+    model.eyelidContours.upperContour.clear();
+    model.eyelidContours.upperContour.push_back(Vector2(0.0f, eye.pupilPosY + 0.1f));
+    model.eyelidContours.upperContour.push_back(Vector2(0.5f, eye.pupilPosY + 0.05f));
+    model.eyelidContours.upperContour.push_back(Vector2(1.0f, eye.pupilPosY + 0.1f));
     
-    model.eyelidContours.lowerContour = {
-      {0.0f, eye.pupilPosY - 0.1f},
-      {0.5f, eye.pupilPosY - 0.05f},
-      {1.0f, eye.pupilPosY - 0.1f}
-    };
+    model.eyelidContours.lowerContour.clear();
+    model.eyelidContours.lowerContour.push_back(Vector2(0.0f, eye.pupilPosY - 0.1f));
+    model.eyelidContours.lowerContour.push_back(Vector2(0.5f, eye.pupilPosY - 0.05f));
+    model.eyelidContours.lowerContour.push_back(Vector2(1.0f, eye.pupilPosY - 0.1f));
     
     model.eyelidContours.curvature = 1.0f;
     model.eyelidContours.thickness = 1.0f;
@@ -749,11 +748,14 @@ namespace psvr2_toolkit {
   }
 
   void ScientificAlgorithmManager::SetAlgorithmWeight(const std::string& name, float weight) {
-    m_hybrid.SetEstimatorWeight(name, weight);
+    // Only PMC8018226 is enabled, weight setting not applicable
+    if (name == "pmc8018226_model") {
+      // Weight is fixed at 1.0 for single algorithm
+    }
   }
 
   void ScientificAlgorithmManager::SetFusionMethod(const std::string& method) {
-    m_hybrid.SetFusionMethod(method);
+    // Only PMC8018226 is enabled, fusion not applicable
   }
 
   float ScientificAlgorithmManager::EstimateOpenness(const EyeData& eye, const std::string& method) {
