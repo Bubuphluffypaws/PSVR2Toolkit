@@ -380,11 +380,10 @@ namespace psvr2_toolkit {
     
     // Calculate gaze angle
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
-    int gazeBin = static_cast<int>(gazeAngle * 10.0f); // 10-degree bins
     
     // Learn squint patterns for different gaze directions
     float observedSquint = CalculateObservedSquint(eye, openness);
-    m_gazeBehavior.UpdateSquintFactor(gazeBin, observedSquint);
+    m_gazeBehavior.UpdateSquintFactor(gazeAngle, observedSquint);
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::GetCompensatedOpenness(float rawOpenness, const EyeData& eye) {

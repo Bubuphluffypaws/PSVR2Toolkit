@@ -100,7 +100,7 @@ namespace psvr2_toolkit {
       
       // Apply weight decay to reduce influence of very old samples
       if (m_gazeSampleCount > gazeHistorySize) {
-        learningRate *= std::pow(gazeWeightDecay, m_gazeSampleCount - gazeHistorySize);
+        learningRate *= static_cast<float>(std::pow(gazeWeightDecay, m_gazeSampleCount - gazeHistorySize));
       }
 
       // Update each component of the learned neutral gaze

@@ -158,9 +158,11 @@ int CaesarUsbThreadGaze::poll() {
     float leftEyelidOpenness, rightEyelidOpenness;
     
     if (ENABLE_AB_TESTING && !USE_NEW_IMPLEMENTATION_BOTH_EYES) {
-      // A/B Testing Mode: Original Master (left) vs Modern (right)
-      // Left eye: Original master implementation + pupil dilation normalization
-      leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
+      // A/B Testing Mode: Modern implementation for both eyes (since we changed leftEyelidEstimator to ModernEyelidEstimator)
+      // Left eye: Modern implementation
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      leftEyelidOpenness = leftResult.openness;
       
       // Right eye: Modern implementation + headset calibration
       psvr2_toolkit::CalibratedEyeData rightEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->rightEye);
