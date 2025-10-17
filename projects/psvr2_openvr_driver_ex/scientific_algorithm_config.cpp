@@ -1,5 +1,7 @@
 #include "scientific_algorithm_config.h"
 #include <map>
+#include <string>
+#include <algorithm>
 
 namespace psvr2_toolkit {
 
