@@ -219,9 +219,15 @@ int CaesarUsbThreadGaze::poll() {
         rightEyelidOpenness = rightResult.openness;
       }
     } else {
-      // Original Implementation for Both Eyes (fallback)
-      leftEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->leftEye);
-      rightEyelidOpenness = leftEyelidEstimator.Estimate(pGazeState->rightEye);
+      // Fallback: Convert Hmd2GazeEye to EyeData and use modern estimators
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      
+      leftEyelidOpenness = leftResult.openness;
+      rightEyelidOpenness = rightResult.openness;
     }
     
     pIpcServer->UpdateGazeState(pGazeState, leftEyelidOpenness, rightEyelidOpenness);
