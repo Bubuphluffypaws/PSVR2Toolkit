@@ -105,11 +105,8 @@ namespace psvr2_toolkit {
                  blinkInfluencedOpenness * m_config.blinkOverrideStrength;
     }
     
-    // Apply temporal smoothing
-    static float lastOpenness = 0.5f;
-    openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
-               openness * m_config.smoothingAlpha;
-    lastOpenness = openness;
+    // Apply low-pass filter for temporal smoothing
+    openness = m_lowPassFilter.Filter(openness);
     
     float confidence = CalculateOverallConfidence(cues);
     
@@ -538,14 +535,26 @@ namespace psvr2_toolkit {
 
   // BlinkTweener implementation
   float ModernEyelidEstimator::BlinkTweener::UpdateBlinkState(float currentOpenness, float deltaTime) {
-    // Detect blink start
-    if (!isBlinking && !wasBlinking && currentOpenness < blinkDetectionThreshold) {
+    // Calculate velocity for sudden closure detection
+    if (deltaTime > 0.0f) {
+      float currentVelocity = (currentOpenness - lastOpenness) / deltaTime;
+      opennessVelocity = opennessVelocity * velocitySmoothing + currentVelocity * (1.0f - velocitySmoothing);
+    }
+    
+    // Detect blink start - either by threshold OR by sudden velocity
+    bool thresholdBlink = !isBlinking && !wasBlinking && currentOpenness < blinkDetectionThreshold;
+    bool velocityBlink = !isBlinking && !wasBlinking && opennessVelocity < velocityThreshold;
+    
+    if (thresholdBlink || velocityBlink) {
       isBlinking = true;
       blinkStartTime = 0.0f;
       blinkDuration = 0.0f;
-      preBlinkOpenness = currentOpenness;
+      preBlinkOpenness = lastOpenness; // Use previous value for more stable pre-blink state
       blinkTarget = 0.0f; // Close completely
     }
+    
+    // Update last openness for next frame
+    lastOpenness = currentOpenness;
     
     // Update blink timing
     if (isBlinking) {

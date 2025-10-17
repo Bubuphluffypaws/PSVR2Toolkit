@@ -37,12 +37,12 @@ CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 // Set to true to use NEW implementation for both eyes
 // Set to false to use OLD implementation for both eyes  
 // Set to "A/B mode" to compare old (left) vs new (right)
-static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = false;
-static constexpr bool ENABLE_AB_TESTING = true;
+static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = true;  // Now using modern for both eyes
+static constexpr bool ENABLE_AB_TESTING = false;                // Disabled since both eyes use modern
 
 // A/B Testing: True baseline vs modern implementation
-psvr2_toolkit::OriginalEyelidEstimator leftEyelidEstimator;   // ORIGINAL master + pupil dilation
-psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation + headset calibration
+psvr2_toolkit::ModernEyelidEstimator leftEyelidEstimator;     // MODERN implementation for left eye
+psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation for right eye
 
 // Headset calibration system (for modern implementation)
 psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
@@ -202,17 +202,17 @@ int CaesarUsbThreadGaze::poll() {
         rightModernData.isBlink = rightEyeData.isBlink;
         rightModernData.isValid = true;
         
-        psvr2_toolkit::EstimationResult leftResult = rightEyelidEstimator.Estimate(leftModernData);
+        psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftModernData);
         psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightModernData);
         
         leftEyelidOpenness = leftResult.openness;
         rightEyelidOpenness = rightResult.openness;
       } else {
         // Fallback to raw data
-        psvr2_toolkit::EyeData leftEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+        psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
         psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
         
-        psvr2_toolkit::EstimationResult leftResult = rightEyelidEstimator.Estimate(leftEyeDataRaw);
+        psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
         psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
         
         leftEyelidOpenness = leftResult.openness;

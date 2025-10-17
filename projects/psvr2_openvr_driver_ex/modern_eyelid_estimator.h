@@ -258,6 +258,12 @@ namespace psvr2_toolkit {
       float minBlinkDuration = 0.05f;          // Minimum blink duration (50ms)
       float maxBlinkDuration = 0.5f;           // Maximum blink duration (500ms)
       
+      // Velocity-based blink detection for sudden closures
+      float lastOpenness = 0.5f;
+      float opennessVelocity = 0.0f;
+      float velocityThreshold = -2.0f;        // Negative velocity threshold for sudden closure
+      float velocitySmoothing = 0.8f;         // Smoothing factor for velocity calculation
+      
       // Tweening parameters
       float blinkCloseSpeed = 8.0f;            // Speed of closing during blink
       float blinkOpenSpeed = 4.0f;             // Speed of opening after blink
@@ -272,6 +278,28 @@ namespace psvr2_toolkit {
       // Get current blink-influenced openness
       float GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime);
     } m_blinkTweener;
+    
+    // Low-pass filter for temporal smoothing
+    struct LowPassFilter {
+      float alpha = 0.15f;                     // Filter coefficient (0.1 = more smoothing, 0.9 = less smoothing)
+      float lastValue = 0.5f;
+      bool initialized = false;
+      
+      float Filter(float input) {
+        if (!initialized) {
+          lastValue = input;
+          initialized = true;
+          return input;
+        }
+        lastValue = alpha * input + (1.0f - alpha) * lastValue;
+        return lastValue;
+      }
+      
+      void Reset() {
+        initialized = false;
+        lastValue = 0.5f;
+      }
+    } m_lowPassFilter;
     
     // Configuration
     struct Config {
