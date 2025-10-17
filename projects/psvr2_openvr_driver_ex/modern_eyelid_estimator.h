@@ -237,7 +237,7 @@ namespace psvr2_toolkit {
       Vector3 EstimatePupilOffset(const EyeData& eye);
       float EstimateEyeRadius(const EyeData& eye);
       float CalculateObservedSquint(const EyeData& eye, float openness);
-      Vector3 CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry);
+      static Vector3 CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry);
       float ApplySquintCompensation(float openness, float squintFactor);
       float EstimateCurrentOpenness(const EyeData& eye);
       float CalculateGazeAngle(const Vector3& gazeDir);

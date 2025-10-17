@@ -450,7 +450,8 @@ namespace psvr2_toolkit {
     if (!geometry.isCalibrated) return false;
     
     // Calculate expected pupil position based on gaze
-    Vector3 expectedPupilPos = PupilOcclusionDetector::CalculateExpectedPupilPosition(eye.gazeDir, geometry);
+    // Since this is a nested struct, we need to access the parent's static function
+    Vector3 expectedPupilPos = EyeGeometryCalibrator::CalculateExpectedPupilPosition(eye.gazeDir, geometry);
     Vector3 actualPupilPos = Vector3(0, eye.pupilPosY, 0); // Simplified 2D position
     
     // Calculate displacement
