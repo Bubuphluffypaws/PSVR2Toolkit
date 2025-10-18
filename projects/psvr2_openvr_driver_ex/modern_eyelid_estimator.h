@@ -93,7 +93,9 @@ namespace psvr2_toolkit {
       enum SmoothingMethod {
         SIMPLE_LOWPASS,      // Basic low-pass filter
         STRONG_AVERAGING,    // Multi-sample averaging
-        KALMAN_FILTER       // Kalman filter (future)
+        KALMAN_FILTER,       // Kalman filter for optimal noise filtering
+        MEDIAN_FILTER,       // Median filter to eliminate outliers
+        HYBRID_SMOOTHING     // Combination of Kalman + Median for maximum noise reduction
       };
       
       SmoothingMethod method = STRONG_AVERAGING;  // Default to strong averaging for smooth squinting
@@ -148,23 +150,92 @@ namespace psvr2_toolkit {
         }
       } averaging;
       
-      // Kalman filter (placeholder for future implementation)
+      // Kalman filter for optimal noise filtering
       struct KalmanFilter {
-        float state = 0.5f;
-        float covariance = 1.0f;
-        float processNoise = 0.01f;
-        float measurementNoise = 0.1f;
+        float state = 0.5f;                    // Current state estimate
+        float covariance = 1.0f;               // State uncertainty
+        float processNoise = 0.001f;           // How much the state can change (very low for eyelid tracking)
+        float measurementNoise = 0.05f;        // Measurement uncertainty (higher = trust measurements less)
+        float innovation = 0.0f;               // Innovation (measurement - prediction)
+        float kalmanGain = 0.0f;              // Kalman gain
+        bool initialized = false;
         
         float Filter(float input) {
-          // Simple placeholder - just return input for now
-          return input;
+          if (!initialized) {
+            state = input;
+            covariance = measurementNoise;
+            initialized = true;
+            return input;
+          }
+          
+          // Prediction step
+          float predictedState = state;  // No process model for eyelid tracking (state doesn't change on its own)
+          float predictedCovariance = covariance + processNoise;
+          
+          // Update step
+          innovation = input - predictedState;
+          kalmanGain = predictedCovariance / (predictedCovariance + measurementNoise);
+          
+          state = predictedState + kalmanGain * innovation;
+          covariance = (1.0f - kalmanGain) * predictedCovariance;
+          
+          return state;
         }
         
         void Reset() {
           state = 0.5f;
           covariance = 1.0f;
+          innovation = 0.0f;
+          kalmanGain = 0.0f;
+          initialized = false;
         }
       } kalman;
+      
+      // Median filter to eliminate outliers
+      struct MedianFilter {
+        static constexpr int BUFFER_SIZE = 7;   // Small buffer for median calculation
+        float buffer[BUFFER_SIZE];
+        int currentIndex = 0;
+        int sampleCount = 0;
+        
+        float Filter(float input) {
+          buffer[currentIndex] = input;
+          currentIndex = (currentIndex + 1) % BUFFER_SIZE;
+          sampleCount = (sampleCount + 1 < BUFFER_SIZE) ? sampleCount + 1 : BUFFER_SIZE;
+          
+          // Create a copy for sorting
+          float sortedBuffer[BUFFER_SIZE];
+          for (int i = 0; i < sampleCount; i++) {
+            sortedBuffer[i] = buffer[i];
+          }
+          
+          // Simple bubble sort for median calculation
+          for (int i = 0; i < sampleCount - 1; i++) {
+            for (int j = 0; j < sampleCount - i - 1; j++) {
+              if (sortedBuffer[j] > sortedBuffer[j + 1]) {
+                float temp = sortedBuffer[j];
+                sortedBuffer[j] = sortedBuffer[j + 1];
+                sortedBuffer[j + 1] = temp;
+              }
+            }
+          }
+          
+          // Return median value
+          if (sampleCount % 2 == 1) {
+            return sortedBuffer[sampleCount / 2];
+          } else {
+            return (sortedBuffer[sampleCount / 2 - 1] + sortedBuffer[sampleCount / 2]) * 0.5f;
+          }
+        }
+        
+        void Reset() {
+          currentIndex = 0;
+          sampleCount = 0;
+          for (int i = 0; i < BUFFER_SIZE; i++) {
+            buffer[i] = 0.5f;
+          }
+        }
+      } median;
       
       float Filter(float input) {
         switch (method) {
@@ -174,6 +245,12 @@ namespace psvr2_toolkit {
             return averaging.Filter(input);
           case KALMAN_FILTER:
             return kalman.Filter(input);
+          case MEDIAN_FILTER:
+            return median.Filter(input);
+          case HYBRID_SMOOTHING:
+            // Apply median filter first to eliminate outliers, then Kalman for optimal smoothing
+            float medianFiltered = median.Filter(input);
+            return kalman.Filter(medianFiltered);
           default:
             return averaging.Filter(input);
         }
@@ -183,6 +260,7 @@ namespace psvr2_toolkit {
         lowPass.Reset();
         averaging.Reset();
         kalman.Reset();
+        median.Reset();
       }
     };
 
@@ -416,6 +494,22 @@ namespace psvr2_toolkit {
       float edgePupilCompensation = 0.3f; // Compensation factor for edge pupils
       float minDiameterWeight = 0.4f;  // Minimum weight for diameter cue (increased from 0.2f)
       float maxPositionWeight = 0.6f; // Maximum weight for position cue (reduced from 1.0f)
+      
+      // Gaze-dependent occlusion thresholds
+      float centerOcclusionThreshold = 0.3f;  // At center gaze, occlusion > 0.3 = closed
+      float edgeOcclusionThreshold = 0.7f;    // At edge gaze, occlusion > 0.7 = closed
+      float occlusionTransitionRange = 0.4f;  // Range over which threshold transitions (0.4f = smooth transition)
+      float edgeSlackFactor = 0.2f;           // Additional slack for edge pupils (0.2f = 20% more tolerance)
+      
+      // Neutral gaze learning parameters
+      float neutralGazeLearningRate = 0.001f;  // How fast to learn user's neutral gaze
+      float neutralGazeBiasY = 0.0f;          // Bias toward upward gaze (positive = up, negative = down)
+      bool enableNeutralGazeBias = false;     // Whether to apply Y-bias to learned neutral gaze
+      
+      // Advanced noise filtering parameters
+      float outlierThreshold = 0.3f;           // Threshold for detecting outliers (0.3 = 30% deviation)
+      bool enableOutlierRejection = true;     // Whether to reject obvious outliers
+      float noiseFloor = 0.02f;               // Minimum noise level to consider (below this = likely noise)
     } m_config;
     
     // Private helper functions
@@ -429,6 +523,7 @@ namespace psvr2_toolkit {
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
     float CalculateGazeAngle(const Vector3& gazeDir) const;
     bool IsNeutralGaze(const Vector3& gazeDir);
+    float CalculateAdaptiveOcclusionThreshold(float gazeAngle) const;
     
   }; // class ModernEyelidEstimator
 

@@ -141,12 +141,12 @@ namespace psvr2_toolkit {
     // Further normalize using gaze-aware references (secondary normalization)
     float denom = std::max(refs.openDia.value - refs.closedDia.value, 1e-6f);
     float refNormalizedDia = (correctedDia - refs.closedDia.value) / denom;
-    refNormalizedDia = std::clamp(refNormalizedDia, 0.0f, 1.0f);
+    refNormalizedDia = (refNormalizedDia < 0.0f) ? 0.0f : (refNormalizedDia > 1.0f) ? 1.0f : refNormalizedDia;
     
     // Blend dilation-normalized and reference-normalized values
     // Use dilation normalization as primary, reference as secondary
     float blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
-    blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
+    blendedDia = (blendedDia < 0.0f) ? 0.0f : (blendedDia > 1.0f) ? 1.0f : blendedDia;
     
     // Calculate uncertainty based on gaze angle, reference stability, and dilation consistency
     float gazeUncertainty = std::sin(gazeAngle);  // Higher angle = more uncertainty
@@ -163,7 +163,7 @@ namespace psvr2_toolkit {
     // Normalize position - standard logic: higher Y = more open eyes
     float denom = std::max(refs.openPosY.value - refs.closedPosY.value, 1e-6f);
     float normalizedPos = (eye.pupilPosY - refs.closedPosY.value) / denom;
-    normalizedPos = std::clamp(normalizedPos, 0.0f, 1.0f);
+    normalizedPos = (normalizedPos < 0.0f) ? 0.0f : (normalizedPos > 1.0f) ? 1.0f : normalizedPos;
     
     // Position is less affected by gaze angle than diameter
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
@@ -195,6 +195,25 @@ namespace psvr2_toolkit {
     }
   }
 
+  float ModernEyelidEstimator::CalculateAdaptiveOcclusionThreshold(float gazeAngle) const {
+    // Calculate gaze-dependent occlusion threshold
+    // At center gaze (low angle): low threshold (any occlusion = closed)
+    // At edge gaze (high angle): high threshold (significant occlusion needed = closed)
+    
+    // Normalize gaze angle to 0-1 range (0 = center, 1 = extreme edge)
+    float normalizedAngle = (gazeAngle < 0.0f) ? 0.0f : (gazeAngle > 1.0f) ? 1.0f : gazeAngle;
+    
+    // Smooth transition between center and edge thresholds
+    float transitionFactor = normalizedAngle / m_config.occlusionTransitionRange;
+    transitionFactor = (transitionFactor < 0.0f) ? 0.0f : (transitionFactor > 1.0f) ? 1.0f : transitionFactor;
+    
+    // Interpolate between center and edge thresholds
+    float threshold = m_config.centerOcclusionThreshold * (1.0f - transitionFactor) + 
+                     m_config.edgeOcclusionThreshold * transitionFactor;
+    
+    return threshold;
+  }
+
   void ModernEyelidEstimator::UpdateReferences(const EyeData& eye, GazeAwareReferences& refs) {
     if (!eye.isValid) return;
     
@@ -209,10 +228,10 @@ namespace psvr2_toolkit {
     } else if (IsNeutralGaze(eye.gazeDir)) {
       // Slower learning for open references, only at neutral gaze
       // Only update if we have a reasonable difference from closed reference
-      if (std::abs(eye.pupilDiaMm - refs.closedDia.value) > 0.5f) {
+      if ((eye.pupilDiaMm - refs.closedDia.value < 0) ? -eye.pupilDiaMm - refs.closedDia.value : eye.pupilDiaMm - refs.closedDia.value > 0.5f) {
         refs.openDia.Update(eye.pupilDiaMm, 0.3f * angleConfidence);
       }
-      if (std::abs(eye.pupilPosY - refs.closedPosY.value) > 0.1f) {
+      if ((eye.pupilPosY - refs.closedPosY.value < 0) ? -eye.pupilPosY - refs.closedPosY.value : eye.pupilPosY - refs.closedPosY.value > 0.1f) {
         refs.openPosY.Update(eye.pupilPosY, 0.3f * angleConfidence);
       }
     }
@@ -244,11 +263,19 @@ namespace psvr2_toolkit {
       m_learnedNeutralGaze = avgGaze;
       m_neutralGazeConfidence = 0.1f;
     } else {
-      // Update using exponential moving average
-      float learningRate = std::min(0.01f, 1.0f / m_gazeSampleCount);
-      m_learnedNeutralGaze.x = m_learnedNeutralGaze.x * (1.0f - learningRate) + avgGaze.x * learningRate;
-      m_learnedNeutralGaze.y = m_learnedNeutralGaze.y * (1.0f - learningRate) + avgGaze.y * learningRate;
-      m_learnedNeutralGaze.z = m_learnedNeutralGaze.z * (1.0f - learningRate) + avgGaze.z * learningRate;
+      // Update using configurable learning rate
+      float learningRate = m_config.neutralGazeLearningRate;
+      
+      // Apply Y-bias if enabled (for headset mounting compensation)
+      Vector3 biasedAvgGaze = avgGaze;
+      if (m_config.enableNeutralGazeBias) {
+        biasedAvgGaze.y += m_config.neutralGazeBiasY;
+        biasedAvgGaze = biasedAvgGaze.Normalized();
+      }
+      
+      m_learnedNeutralGaze.x = m_learnedNeutralGaze.x * (1.0f - learningRate) + biasedAvgGaze.x * learningRate;
+      m_learnedNeutralGaze.y = m_learnedNeutralGaze.y * (1.0f - learningRate) + biasedAvgGaze.y * learningRate;
+      m_learnedNeutralGaze.z = m_learnedNeutralGaze.z * (1.0f - learningRate) + biasedAvgGaze.z * learningRate;
       
       // Normalize
       m_learnedNeutralGaze = m_learnedNeutralGaze.Normalized();
@@ -277,34 +304,58 @@ namespace psvr2_toolkit {
       }
     }
     
-    // Special edge pupil handling
+    // Special edge pupil handling with gaze-dependent occlusion thresholds
     if (hasDiameter && hasPosition) {
       // Calculate gaze angle from diameter cue uncertainty (higher uncertainty = more extreme gaze)
       float gazeAngle = diameterCue.uncertainty;
       
-      // If we're at edge pupils (high uncertainty), adjust weights
+      // Calculate adaptive occlusion threshold based on gaze angle
+      float occlusionThreshold = CalculateAdaptiveOcclusionThreshold(gazeAngle);
+      
+      // Calculate base weights for both edge and center cases
+      float diameterWeight, positionWeight;
+      
       if (gazeAngle > m_config.edgePupilThreshold) {
         // At edges, reduce position cue influence and boost diameter cue
         float edgeCompensation = m_config.edgePupilCompensation;
         
         // Adjust weights: more diameter, less position at edges
-        float diameterWeight = m_config.minDiameterWeight + edgeCompensation;
-        float positionWeight = m_config.maxPositionWeight - edgeCompensation;
+        diameterWeight = m_config.minDiameterWeight + edgeCompensation;
+        positionWeight = m_config.maxPositionWeight - edgeCompensation;
         
         // Ensure weights sum to 1.0
         float totalWeight = diameterWeight + positionWeight;
         diameterWeight /= totalWeight;
         positionWeight /= totalWeight;
-        
-        // Apply weighted fusion with edge compensation
-        float fusedValue = diameterWeight * diameterCue.value + positionWeight * positionCue.value;
-        
-        // Add slight bias toward "open" for edge pupils to prevent false closure
-        float edgeBias = 0.1f * (1.0f - gazeAngle); // Less bias for more extreme angles
-        fusedValue = fusedValue * (1.0f - edgeBias) + 0.7f * edgeBias; // Bias toward 0.7 (more open)
-        
-        return (fusedValue < 0.0f) ? 0.0f : (fusedValue > 1.0f) ? 1.0f : fusedValue;
+      } else {
+        // For center/normal gaze, use balanced weights
+        diameterWeight = 0.65f;  // Standard diameter weight
+        positionWeight = 0.35f;  // Standard position weight
       }
+      
+      // Apply weighted fusion
+      float fusedValue = diameterWeight * diameterCue.value + positionWeight * positionCue.value;
+      
+      // Apply gaze-dependent occlusion threshold logic
+      if (fusedValue < occlusionThreshold) {
+        if (gazeAngle > m_config.edgePupilThreshold) {
+          // At edges, apply additional slack - even if below threshold, give more tolerance
+          float edgeSlack = m_config.edgeSlackFactor * (1.0f - gazeAngle); // More slack for more extreme angles
+          float slackThreshold = occlusionThreshold * (1.0f - edgeSlack);
+          
+          if (fusedValue < slackThreshold) {
+            // Only then consider it truly closed
+            fusedValue = fusedValue; // Keep the low value
+          } else {
+            // Apply edge bias to prevent false closure
+            float edgeBias = 0.15f * (1.0f - gazeAngle); // More bias for less extreme angles
+            fusedValue = fusedValue * (1.0f - edgeBias) + 0.6f * edgeBias; // Bias toward 0.6 (more open)
+          }
+        }
+        // For center gaze, any significant occlusion likely means closure (no additional slack)
+      }
+      
+      return (fusedValue < 0.0f) ? 0.0f : (fusedValue > 1.0f) ? 1.0f : fusedValue;
     }
     
     // Standard uncertainty-based fusion for normal cases
@@ -501,7 +552,7 @@ namespace psvr2_toolkit {
       return upGazeSquintFactor;
     } else if (gazeAngle < -0.3f) { // Looking down
       return downGazeSquintFactor;
-    } else if (std::abs(gazeAngle) < 0.1f) { // Neutral
+    } else if ((gazeAngle < 0) ? -gazeAngle : gazeAngle < 0.1f) { // Neutral
       return neutralGazeSquintFactor;
     } else { // Lateral
       return lateralGazeSquintFactor;
@@ -539,7 +590,7 @@ namespace psvr2_toolkit {
     float compensationFactor = 1.0f + (occlusionConfidence * compensationStrength);
     float compensatedOpenness = rawOpenness * compensationFactor;
     
-    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
+    return (compensatedOpenness < 0.0f) ? 0.0f : (compensatedOpenness > 1.0f) ? 1.0f : compensatedOpenness;
   }
 
   // Helper functions for eye geometry calibration
@@ -553,14 +604,14 @@ namespace psvr2_toolkit {
     // Estimate eye radius from pupil diameter and position
     // Typical eye radius is 12mm, pupil diameter varies 2-8mm
     float estimatedRadius = eye.pupilDiaMm * 3.0f; // Rough estimation
-    return std::clamp(estimatedRadius, 8.0f, 16.0f);
+    return (estimatedRadius < 8.0f) ? 8.0f : (estimatedRadius > 16.0f) ? 16.0f : estimatedRadius;
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateObservedSquint(const EyeData& eye, float openness) {
     // Calculate observed squint based on pupil dynamics
     // When squinting, pupil appears smaller and position changes
     float squintIndicator = 1.0f - (eye.pupilDiaMm / 4.0f); // Normalize to 0-1
-    return std::clamp(squintIndicator, 0.0f, 1.0f);
+    return (squintIndicator < 0.0f) ? 0.0f : (squintIndicator > 1.0f) ? 1.0f : squintIndicator;
   }
 
   Vector3 ModernEyelidEstimator::EyeGeometryCalibrator::CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry) {
@@ -583,20 +634,22 @@ namespace psvr2_toolkit {
     // Apply squint compensation to openness
     // Higher squint factor means more squinting, so openness should be reduced
     float compensatedOpenness = openness / squintFactor;
-    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
+    return (compensatedOpenness < 0.0f) ? 0.0f : (compensatedOpenness > 1.0f) ? 1.0f : compensatedOpenness;
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::EstimateCurrentOpenness(const EyeData& eye) {
     // Estimate current openness for learning purposes
     // This is a simplified estimation - would use actual measurement in real implementation
-    float diameterOpenness = std::clamp(eye.pupilDiaMm / 4.0f, 0.0f, 1.0f);
-    float positionOpenness = std::clamp(eye.pupilPosY, 0.0f, 1.0f);
+    float diameterOpenness = (eye.pupilDiaMm / 4.0f < 0.0f) ? 0.0f : (eye.pupilDiaMm / 4.0f > 1.0f) ? 1.0f : eye.pupilDiaMm / 4.0f;
+    float positionOpenness = (eye.pupilPosY < 0.0f) ? 0.0f : (eye.pupilPosY > 1.0f) ? 1.0f : eye.pupilPosY;
     return (diameterOpenness + positionOpenness) * 0.5f;
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateGazeAngle(const Vector3& gazeDir) {
     // Calculate vertical gaze angle
-    return std::asin(std::clamp(std::abs(gazeDir.y), 0.0f, 1.0f));
+    float absY = (gazeDir.y < 0) ? -gazeDir.y : gazeDir.y;
+    float clampedY = (absY < 0.0f) ? 0.0f : (absY > 1.0f) ? 1.0f : absY;
+    return std::asin(clampedY);
   }
 
   // BlinkTweener implementation
