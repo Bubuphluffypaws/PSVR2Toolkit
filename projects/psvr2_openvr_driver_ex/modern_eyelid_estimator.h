@@ -102,6 +102,104 @@ namespace psvr2_toolkit {
       return m_smoothingSystem.method;
     }
 
+    // Enhanced smoothing system with multiple options
+    struct SmoothingSystem {
+      enum SmoothingMethod {
+        SIMPLE_LOWPASS,      // Basic low-pass filter
+        STRONG_AVERAGING,    // Multi-sample averaging
+        KALMAN_FILTER       // Kalman filter (future)
+      };
+      
+      SmoothingMethod method = STRONG_AVERAGING;  // Default to strong averaging for smooth squinting
+      
+      // Simple low-pass filter
+      struct LowPassFilter {
+        float alpha = 0.05f;                     // Very aggressive smoothing
+        float lastValue = 0.5f;
+        bool initialized = false;
+        
+        float Filter(float input) {
+          if (!initialized) {
+            lastValue = input;
+            initialized = true;
+            return input;
+          }
+          lastValue = alpha * input + (1.0f - alpha) * lastValue;
+          return lastValue;
+        }
+        
+        void Reset() {
+          initialized = false;
+          lastValue = 0.5f;
+        }
+      } lowPass;
+      
+      // Strong averaging (moving average)
+      struct StrongAveraging {
+        static constexpr int BUFFER_SIZE = 30;   // Average over 30 samples (~500ms at 60fps)
+        float buffer[BUFFER_SIZE];
+        int currentIndex = 0;
+        int sampleCount = 0;
+        
+        float Filter(float input) {
+          buffer[currentIndex] = input;
+          currentIndex = (currentIndex + 1) % BUFFER_SIZE;
+          sampleCount = std::min(sampleCount + 1, BUFFER_SIZE);
+          
+          float sum = 0.0f;
+          for (int i = 0; i < sampleCount; ++i) {
+            sum += buffer[i];
+          }
+          return sum / sampleCount;
+        }
+        
+        void Reset() {
+          currentIndex = 0;
+          sampleCount = 0;
+          for (int i = 0; i < BUFFER_SIZE; ++i) {
+            buffer[i] = 0.5f;
+          }
+        }
+      } averaging;
+      
+      // Kalman filter (placeholder for future implementation)
+      struct KalmanFilter {
+        float state = 0.5f;
+        float covariance = 1.0f;
+        float processNoise = 0.01f;
+        float measurementNoise = 0.1f;
+        
+        float Filter(float input) {
+          // Simple placeholder - just return input for now
+          return input;
+        }
+        
+        void Reset() {
+          state = 0.5f;
+          covariance = 1.0f;
+        }
+      } kalman;
+      
+      float Filter(float input) {
+        switch (method) {
+          case SIMPLE_LOWPASS:
+            return lowPass.Filter(input);
+          case STRONG_AVERAGING:
+            return averaging.Filter(input);
+          case KALMAN_FILTER:
+            return kalman.Filter(input);
+          default:
+            return averaging.Filter(input);
+        }
+      }
+      
+      void Reset() {
+        lowPass.Reset();
+        averaging.Reset();
+        kalman.Reset();
+      }
+    };
+
   private:
     // Adaptive learning with exponential moving averages
     struct AdaptiveReference {
@@ -292,8 +390,9 @@ namespace psvr2_toolkit {
       float GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime);
     } m_blinkTweener;
     
-    // Enhanced smoothing system with multiple options
-    struct SmoothingSystem {
+    SmoothingSystem m_smoothingSystem;  // Instance of the public SmoothingSystem struct
+    
+    // Configuration
       enum SmoothingMethod {
         SIMPLE_LOWPASS,      // Basic low-pass filter
         STRONG_AVERAGING,    // Multi-sample averaging

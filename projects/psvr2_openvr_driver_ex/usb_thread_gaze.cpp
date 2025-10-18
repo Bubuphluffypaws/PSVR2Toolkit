@@ -37,6 +37,10 @@ CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 static constexpr int SMOOTHING_METHOD = 1;  // 0=LowPass, 1=StrongAveraging(500ms), 2=Kalman
 static constexpr bool ENABLE_INDEPENDENT_EYES = true;  // Each eye tracks independently
 
+// A/B Testing configuration
+static constexpr bool ENABLE_AB_TESTING = false;  // Disabled - using modern implementation for both eyes
+static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = true;  // Use modern implementation for both eyes
+
 // A/B Testing: True baseline vs modern implementation
 psvr2_toolkit::ModernEyelidEstimator leftEyelidEstimator;     // MODERN implementation for left eye
 psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation for right eye
@@ -46,16 +50,25 @@ psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
 
 // Initialize smoothing methods
 void InitializeSmoothingMethods() {
-  psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SmoothingMethod method;
+  // Use the public enum values directly
   switch (SMOOTHING_METHOD) {
-    case 0: method = psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS; break;
-    case 1: method = psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING; break;
-    case 2: method = psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER; break;
-    default: method = psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING; break;
+    case 0: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
+      break;
+    case 1: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      break;
+    case 2: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
+      break;
+    default: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      break;
   }
-  
-  leftEyelidEstimator.SetSmoothingMethod(method);
-  rightEyelidEstimator.SetSmoothingMethod(method);
 }
 
 void *j_CaesarUsbThreadGaze__dtor_CaesarUsbThreadGaze(CaesarUsbThreadGaze *thisptr, char a2) {
