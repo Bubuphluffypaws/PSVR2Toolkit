@@ -391,14 +391,6 @@ namespace psvr2_toolkit {
     
     SmoothingSystem m_smoothingSystem;  // Instance of the public SmoothingSystem struct
     
-    // Member variables for gaze learning
-    Vector3 m_learnedNeutralGaze;
-    float m_neutralGazeConfidence;
-    int m_gazeSampleCount;
-    
-    // Gaze-aware references for each eye
-    GazeAwareReferences m_leftRefs, m_rightRefs;
-    
     // Configuration
     struct Config {
       float minLearningRate = 0.001f;
@@ -429,8 +421,6 @@ namespace psvr2_toolkit {
     CueMeasurement MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs);
     CueMeasurement MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs);
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
-    float CalculateGazeAngle(const Vector3& gazeDir);
-    bool IsNeutralGaze(const Vector3& gazeDir);
     
   }; // class ModernEyelidEstimator
 
