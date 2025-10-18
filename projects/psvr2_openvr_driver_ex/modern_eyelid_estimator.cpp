@@ -183,10 +183,12 @@ namespace psvr2_toolkit {
 
   float ModernEyelidEstimator::CalculateGazeAngle(const Vector3& gazeDir) const {
     // Calculate vertical gaze angle (up/down)
-    return std::asin(std::clamp(std::abs(gazeDir.y), 0.0f, 1.0f));
+    float absY = (gazeDir.y < 0) ? -gazeDir.y : gazeDir.y;
+    float clampedY = (absY < 0.0f) ? 0.0f : (absY > 1.0f) ? 1.0f : absY;
+    return std::asin(clampedY);
   }
 
-  bool ModernEyelidEstimator::IsNeutralGaze(const Vector3& gazeDir) const {
+  bool ModernEyelidEstimator::IsNeutralGaze(const Vector3& gazeDir) {
     if (m_neutralGazeConfidence > 0.5f) {
       // Use learned neutral gaze
       float dotProduct = gazeDir.Dot(m_learnedNeutralGaze);

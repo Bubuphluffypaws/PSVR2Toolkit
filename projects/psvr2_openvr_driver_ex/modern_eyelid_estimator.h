@@ -421,7 +421,7 @@ namespace psvr2_toolkit {
     CueMeasurement MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs);
     CueMeasurement MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs);
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
-    float CalculateGazeAngle(const Vector3& gazeDir);
+    float CalculateGazeAngle(const Vector3& gazeDir) const;
     bool IsNeutralGaze(const Vector3& gazeDir);
     
   }; // class ModernEyelidEstimator
