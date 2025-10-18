@@ -5,7 +5,6 @@
 #include "eyelid_estimator.h"
 #include "original_eyelid_estimator.h"
 #include "modern_eyelid_estimator.h"
-#include "headset_calibrator.h"
 #include "hmd2_gaze.h"
 #include "ipc_server.h"
 
@@ -44,9 +43,6 @@ static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = true;  // Use modern im
 // A/B Testing: True baseline vs modern implementation
 psvr2_toolkit::ModernEyelidEstimator leftEyelidEstimator;     // MODERN implementation for left eye
 psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation for right eye
-
-// Headset calibration system (for modern implementation)
-psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
 
 // Initialize smoothing methods
 void InitializeSmoothingMethods() {
@@ -196,66 +192,21 @@ int CaesarUsbThreadGaze::poll() {
       psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
       leftEyelidOpenness = leftResult.openness;
       
-      // Right eye: Modern implementation + headset calibration
-      psvr2_toolkit::CalibratedEyeData rightEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->rightEye);
-      if (rightEyeData.isValid) {
-        // Convert calibrated data to modern estimator format
-        psvr2_toolkit::EyeData modernEyeData;
-        modernEyeData.pupilDiaMm = rightEyeData.compensatedPupilDia;
-        modernEyeData.pupilPosY = rightEyeData.compensatedPupilPos.y;
-        modernEyeData.gazeDir = rightEyeData.compensatedGazeDir;
-        modernEyeData.isBlink = rightEyeData.isBlink;
-        modernEyeData.isValid = true;
-        
-        psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(modernEyeData);
-        rightEyelidOpenness = rightResult.openness;
-      } else {
-        // Fallback to raw data
-        psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
-        psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
-        rightEyelidOpenness = rightResult.openness;
-      }
+      // Right eye: Modern implementation
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      rightEyelidOpenness = rightResult.openness;
     } else if (USE_NEW_IMPLEMENTATION_BOTH_EYES) {
-      // Modern Implementation for Both Eyes with calibration
-      psvr2_toolkit::CalibratedEyeData leftEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->leftEye);
-      psvr2_toolkit::CalibratedEyeData rightEyeData = headsetCalibrator.CalibrateEyeData(pGazeState->rightEye);
+      // Modern Implementation for Both Eyes (simplified - no headset calibration)
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
       
-      if (leftEyeData.isValid && rightEyeData.isValid) {
-        // Convert calibrated data to modern estimator format
-        psvr2_toolkit::EyeData leftModernData, rightModernData;
-        
-        // Left eye data - ensure proper mapping
-        leftModernData.pupilDiaMm = leftEyeData.compensatedPupilDia;
-        leftModernData.pupilPosY = leftEyeData.compensatedPupilPos.y;
-        leftModernData.gazeDir = leftEyeData.compensatedGazeDir;
-        leftModernData.isBlink = leftEyeData.isBlink;  // Left eye blink data
-        leftModernData.isValid = true;
-        
-        // Right eye data - ensure proper mapping
-        rightModernData.pupilDiaMm = rightEyeData.compensatedPupilDia;
-        rightModernData.pupilPosY = rightEyeData.compensatedPupilPos.y;
-        rightModernData.gazeDir = rightEyeData.compensatedGazeDir;
-        rightModernData.isBlink = rightEyeData.isBlink;  // Right eye blink data
-        rightModernData.isValid = true;
-        
-        // Use individual eye estimation for independent movement
-        psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftModernData);
-        psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightModernData);
-        
-        leftEyelidOpenness = leftResult.openness;
-        rightEyelidOpenness = rightResult.openness;
-      } else {
-        // Fallback to raw data
-        psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
-        psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
-        
-        // Use individual eye estimation for fallback
-        psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
-        psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
-        
-        leftEyelidOpenness = leftResult.openness;
-        rightEyelidOpenness = rightResult.openness;
-      }
+      // Use individual eye estimation for independent movement
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      
+      leftEyelidOpenness = leftResult.openness;
+      rightEyelidOpenness = rightResult.openness;
     } else {
       // Fallback: Convert Hmd2GazeEye to EyeData and use modern estimators
       psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);

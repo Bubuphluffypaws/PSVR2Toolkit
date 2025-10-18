@@ -89,19 +89,6 @@ namespace psvr2_toolkit {
     // Reset eye geometry calibrator (useful for new sessions)
     void ResetEyeGeometryCalibrator();
     
-    // Smoothing system configuration
-    void SetSmoothingMethod(SmoothingSystem::SmoothingMethod method) {
-      m_smoothingSystem.method = method;
-    }
-    
-    void ResetSmoothing() {
-      m_smoothingSystem.Reset();
-    }
-    
-    SmoothingSystem::SmoothingMethod GetSmoothingMethod() const {
-      return m_smoothingSystem.method;
-    }
-
     // Enhanced smoothing system with multiple options
     struct SmoothingSystem {
       enum SmoothingMethod {
@@ -199,6 +186,19 @@ namespace psvr2_toolkit {
         kalman.Reset();
       }
     };
+
+    // Smoothing system configuration methods
+    void SetSmoothingMethod(SmoothingSystem::SmoothingMethod method) {
+      m_smoothingSystem.method = method;
+    }
+    
+    void ResetSmoothing() {
+      m_smoothingSystem.Reset();
+    }
+    
+    SmoothingSystem::SmoothingMethod GetSmoothingMethod() const {
+      return m_smoothingSystem.method;
+    }
 
   private:
     // Adaptive learning with exponential moving averages
