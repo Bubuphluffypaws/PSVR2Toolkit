@@ -122,7 +122,7 @@ namespace psvr2_toolkit {
       
       // Strong averaging (moving average)
       struct StrongAveraging {
-        static constexpr int BUFFER_SIZE = 30;   // Average over 30 samples (~500ms at 60fps)
+        static constexpr int BUFFER_SIZE = 45;   // Increased to 45 samples (~750ms at 60fps) for more smoothing
         float buffer[BUFFER_SIZE];
         int currentIndex = 0;
         int sampleCount = 0;
@@ -397,7 +397,7 @@ namespace psvr2_toolkit {
       float maxLearningRate = 0.05f;
       float neutralGazeThreshold = 0.95f;
       int gazeAngleBins = 10;  // Number of angle-specific reference bins
-      float smoothingAlpha = 0.1f;
+      float smoothingAlpha = 0.05f;  // Reduced for more aggressive smoothing
       float minConfidence = 0.1f;
       bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
       
@@ -405,11 +405,17 @@ namespace psvr2_toolkit {
       bool enableBlinkAugmentation = false;    // Disabled - blinks should be instant, not gradual
       float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
       
-      // Eye geometry calibration parameters
+      // Eye geometry calibration parameters - IMPROVED for edge pupil handling
       bool enableEyeGeometryCalibration = true; // Whether to use adaptive eye geometry calibration
       bool enableGazeDependentBehavior = true;   // Whether to model gaze-dependent eyelid behavior
-      bool enablePupilOcclusionCompensation = true; // Whether to compensate for pupil occlusion
-      float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)
+      bool enablePupilOcclusionCompensation = false; // DISABLED - was causing false closures at edges
+      float geometryCalibrationStrength = 0.5f; // Reduced trust in geometry calibration
+      
+      // Edge pupil handling parameters
+      float edgePupilThreshold = 0.8f;  // Gaze angle threshold for edge pupil detection
+      float edgePupilCompensation = 0.3f; // Compensation factor for edge pupils
+      float minDiameterWeight = 0.4f;  // Minimum weight for diameter cue (increased from 0.2f)
+      float maxPositionWeight = 0.6f; // Maximum weight for position cue (reduced from 1.0f)
     } m_config;
     
     // Private helper functions

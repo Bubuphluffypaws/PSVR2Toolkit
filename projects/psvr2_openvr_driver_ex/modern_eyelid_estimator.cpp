@@ -261,7 +261,53 @@ namespace psvr2_toolkit {
   float ModernEyelidEstimator::FuseCues(const std::vector<CueMeasurement>& cues) {
     if (cues.empty()) return 0.5f;
     
-    // Weight by inverse uncertainty (higher confidence = higher weight)
+    // Separate diameter and position cues for special handling
+    CueMeasurement diameterCue(0.5f, 1.0f, 0.0f, "none");
+    CueMeasurement positionCue(0.5f, 1.0f, 0.0f, "none");
+    bool hasDiameter = false, hasPosition = false;
+    
+    // Find diameter and position cues
+    for (const auto& cue : cues) {
+      if (cue.name == "diameter") {
+        diameterCue = cue;
+        hasDiameter = true;
+      } else if (cue.name == "position") {
+        positionCue = cue;
+        hasPosition = true;
+      }
+    }
+    
+    // Special edge pupil handling
+    if (hasDiameter && hasPosition) {
+      // Calculate gaze angle from diameter cue uncertainty (higher uncertainty = more extreme gaze)
+      float gazeAngle = diameterCue.uncertainty;
+      
+      // If we're at edge pupils (high uncertainty), adjust weights
+      if (gazeAngle > m_config.edgePupilThreshold) {
+        // At edges, reduce position cue influence and boost diameter cue
+        float edgeCompensation = m_config.edgePupilCompensation;
+        
+        // Adjust weights: more diameter, less position at edges
+        float diameterWeight = m_config.minDiameterWeight + edgeCompensation;
+        float positionWeight = m_config.maxPositionWeight - edgeCompensation;
+        
+        // Ensure weights sum to 1.0
+        float totalWeight = diameterWeight + positionWeight;
+        diameterWeight /= totalWeight;
+        positionWeight /= totalWeight;
+        
+        // Apply weighted fusion with edge compensation
+        float fusedValue = diameterWeight * diameterCue.value + positionWeight * positionCue.value;
+        
+        // Add slight bias toward "open" for edge pupils to prevent false closure
+        float edgeBias = 0.1f * (1.0f - gazeAngle); // Less bias for more extreme angles
+        fusedValue = fusedValue * (1.0f - edgeBias) + 0.7f * edgeBias; // Bias toward 0.7 (more open)
+        
+        return (fusedValue < 0.0f) ? 0.0f : (fusedValue > 1.0f) ? 1.0f : fusedValue;
+      }
+    }
+    
+    // Standard uncertainty-based fusion for normal cases
     float weightedSum = 0.0f;
     float totalWeight = 0.0f;
     
