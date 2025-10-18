@@ -247,10 +247,11 @@ namespace psvr2_toolkit {
             return kalman.Filter(input);
           case MEDIAN_FILTER:
             return median.Filter(input);
-          case HYBRID_SMOOTHING:
+          case HYBRID_SMOOTHING: {
             // Apply median filter first to eliminate outliers, then Kalman for optimal smoothing
             float medianFiltered = median.Filter(input);
             return kalman.Filter(medianFiltered);
+          }
           default:
             return averaging.Filter(input);
         }
