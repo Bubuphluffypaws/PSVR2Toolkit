@@ -88,6 +88,19 @@ namespace psvr2_toolkit {
     
     // Reset eye geometry calibrator (useful for new sessions)
     void ResetEyeGeometryCalibrator();
+    
+    // Smoothing system configuration
+    void SetSmoothingMethod(SmoothingSystem::SmoothingMethod method) {
+      m_smoothingSystem.method = method;
+    }
+    
+    void ResetSmoothing() {
+      m_smoothingSystem.Reset();
+    }
+    
+    SmoothingSystem::SmoothingMethod GetSmoothingMethod() const {
+      return m_smoothingSystem.method;
+    }
 
   private:
     // Adaptive learning with exponential moving averages
@@ -279,27 +292,110 @@ namespace psvr2_toolkit {
       float GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime);
     } m_blinkTweener;
     
-    // Low-pass filter for temporal smoothing
-    struct LowPassFilter {
-      float alpha = 0.08f;                     // Filter coefficient (0.1 = more smoothing, 0.9 = less smoothing) - Increased smoothing
-      float lastValue = 0.5f;
-      bool initialized = false;
+    // Enhanced smoothing system with multiple options
+    struct SmoothingSystem {
+      enum SmoothingMethod {
+        SIMPLE_LOWPASS,      // Basic low-pass filter
+        STRONG_AVERAGING,    // Multi-sample averaging
+        KALMAN_FILTER       // Kalman filter (future)
+      };
+      
+      SmoothingMethod method = STRONG_AVERAGING;  // Default to strong averaging for smooth squinting
+      
+      // Simple low-pass filter
+      struct LowPassFilter {
+        float alpha = 0.05f;                     // Very aggressive smoothing
+        float lastValue = 0.5f;
+        bool initialized = false;
+        
+        float Filter(float input) {
+          if (!initialized) {
+            lastValue = input;
+            initialized = true;
+            return input;
+          }
+          lastValue = alpha * input + (1.0f - alpha) * lastValue;
+          return lastValue;
+        }
+        
+        void Reset() {
+          initialized = false;
+          lastValue = 0.5f;
+        }
+      } lowPass;
+      
+      // Strong averaging (moving average)
+      struct StrongAveraging {
+        static constexpr int BUFFER_SIZE = 30;   // Average over 30 samples (~500ms at 60fps)
+        float buffer[BUFFER_SIZE];
+        int currentIndex = 0;
+        int sampleCount = 0;
+        
+        float Filter(float input) {
+          buffer[currentIndex] = input;
+          currentIndex = (currentIndex + 1) % BUFFER_SIZE;
+          sampleCount = std::min(sampleCount + 1, BUFFER_SIZE);
+          
+          float sum = 0.0f;
+          for (int i = 0; i < sampleCount; i++) {
+            sum += buffer[i];
+          }
+          return sum / sampleCount;
+        }
+        
+        void Reset() {
+          currentIndex = 0;
+          sampleCount = 0;
+          for (int i = 0; i < BUFFER_SIZE; i++) {
+            buffer[i] = 0.5f;
+          }
+        }
+      } averaging;
+      
+      // Kalman filter (simplified 1D version)
+      struct KalmanFilter {
+        float state = 0.5f;           // Current estimate
+        float uncertainty = 1.0f;     // Uncertainty in estimate
+        float processNoise = 0.01f;   // How much we expect state to change
+        float measurementNoise = 0.1f; // How noisy our measurements are
+        
+        float Filter(float measurement) {
+          // Prediction step
+          float predictedUncertainty = uncertainty + processNoise;
+          
+          // Update step
+          float kalmanGain = predictedUncertainty / (predictedUncertainty + measurementNoise);
+          state = state + kalmanGain * (measurement - state);
+          uncertainty = (1.0f - kalmanGain) * predictedUncertainty;
+          
+          return state;
+        }
+        
+        void Reset() {
+          state = 0.5f;
+          uncertainty = 1.0f;
+        }
+      } kalman;
       
       float Filter(float input) {
-        if (!initialized) {
-          lastValue = input;
-          initialized = true;
-          return input;
+        switch (method) {
+          case SIMPLE_LOWPASS:
+            return lowPass.Filter(input);
+          case STRONG_AVERAGING:
+            return averaging.Filter(input);
+          case KALMAN_FILTER:
+            return kalman.Filter(input);
+          default:
+            return input;
         }
-        lastValue = alpha * input + (1.0f - alpha) * lastValue;
-        return lastValue;
       }
       
       void Reset() {
-        initialized = false;
-        lastValue = 0.5f;
+        lowPass.Reset();
+        averaging.Reset();
+        kalman.Reset();
       }
-    } m_lowPassFilter;
+    } m_smoothingSystem;
     
     // Configuration
     struct Config {
@@ -311,8 +407,8 @@ namespace psvr2_toolkit {
       float minConfidence = 0.1f;
       bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
       
-      // Blink augmentation parameters
-      bool enableBlinkAugmentation = true;     // Whether to use blink data for augmentation
+      // Blink augmentation parameters - DISABLED for instant blinks
+      bool enableBlinkAugmentation = false;    // Disabled - blinks should be instant, not gradual
       float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
       
       // Eye geometry calibration parameters

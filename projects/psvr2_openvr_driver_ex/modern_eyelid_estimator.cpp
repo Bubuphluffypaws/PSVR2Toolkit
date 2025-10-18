@@ -40,12 +40,18 @@ namespace psvr2_toolkit {
     // 3. Fuse all cues using uncertainty weighting
     float openness = FuseCues(allCues);
     
-    // 4. Direct blink override (like old algorithm)
+    // 4. Direct blink override (like old algorithm) - OVERRIDE EVERYTHING
     if (leftEye.isBlink || rightEye.isBlink) {
       openness = 0.0f; // Immediate eye closure on any blink
+      // Skip all smoothing for instant blink response
+      float confidence = CalculateOverallConfidence(allCues);
+      if (m_config.invertOutput) {
+        openness = 1.0f - openness;
+      }
+      return {openness, confidence, "blink"};
     }
     
-    // 5. Apply temporal smoothing
+    // 5. Apply temporal smoothing (only for non-blink frames)
     static float lastOpenness = 0.5f;
     openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
                openness * m_config.smoothingAlpha;
@@ -87,12 +93,18 @@ namespace psvr2_toolkit {
       openness = m_eyeGeometryCalibrator.GetCompensatedOpenness(openness, eye);
     }
     
-    // Direct blink override (like old algorithm)
+    // Direct blink override (like old algorithm) - OVERRIDE EVERYTHING
     if (eye.isBlink) {
       openness = 0.0f; // Immediate eye closure on blink
+      // Skip all smoothing and augmentation for instant blink response
+      float confidence = CalculateOverallConfidence(cues);
+      if (m_config.invertOutput) {
+        openness = 1.0f - openness;
+      }
+      return {openness, confidence, "blink"};
     }
     
-    // Apply blink augmentation if enabled
+    // Apply blink augmentation if enabled (only for non-blink frames)
     if (m_config.enableBlinkAugmentation) {
       // Use a small delta time for blink tweener (assuming ~60fps)
       float deltaTime = 1.0f / 60.0f;
@@ -105,8 +117,8 @@ namespace psvr2_toolkit {
                  blinkInfluencedOpenness * m_config.blinkOverrideStrength;
     }
     
-    // Apply low-pass filter for temporal smoothing
-    openness = m_lowPassFilter.Filter(openness);
+    // Apply enhanced smoothing system (only for non-blink frames)
+    openness = m_smoothingSystem.Filter(openness);
     
     float confidence = CalculateOverallConfidence(cues);
     
