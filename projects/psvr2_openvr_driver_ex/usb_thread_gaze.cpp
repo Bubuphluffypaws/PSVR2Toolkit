@@ -33,7 +33,7 @@ int (*CaesarUsbThread__read)(void *thisptr, uint8_t pipeId, char *buffer, size_t
 CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 
 // Smoothing configuration - change these to test different methods
-static constexpr int SMOOTHING_METHOD = 4;  // 0=LowPass, 1=StrongAveraging, 2=Kalman, 3=Median, 4=Hybrid(Kalman+Median)
+static constexpr int SMOOTHING_METHOD = 4;  // 0=LowPass, 1=StrongAveraging, 2=Kalman, 3=Median, 4=Hybrid(Kalman+Median) - Back to Hybrid
 static constexpr bool ENABLE_INDEPENDENT_EYES = true;  // Each eye tracks independently
 
 // A/B Testing configuration

@@ -102,7 +102,7 @@ namespace psvr2_toolkit {
       
       // Simple low-pass filter
       struct LowPassFilter {
-        float alpha = 0.05f;                     // Very aggressive smoothing
+        float alpha = 0.3f;                     // Moderate smoothing for responsiveness
         float lastValue = 0.5f;
         bool initialized = false;
         
@@ -124,7 +124,7 @@ namespace psvr2_toolkit {
       
       // Strong averaging (moving average)
       struct StrongAveraging {
-        static constexpr int BUFFER_SIZE = 45;   // Increased to 45 samples (~750ms at 60fps) for more smoothing
+        static constexpr int BUFFER_SIZE = 15;   // Reduced to 15 samples (~250ms at 60fps) for better responsiveness
         float buffer[BUFFER_SIZE];
         int currentIndex = 0;
         int sampleCount = 0;
@@ -154,8 +154,8 @@ namespace psvr2_toolkit {
       struct KalmanFilter {
         float state = 0.5f;                    // Current state estimate
         float covariance = 1.0f;               // State uncertainty
-        float processNoise = 0.001f;           // How much the state can change (very low for eyelid tracking)
-        float measurementNoise = 0.05f;        // Measurement uncertainty (higher = trust measurements less)
+        float processNoise = 0.01f;           // Increased for more responsiveness
+        float measurementNoise = 0.1f;        // Increased measurement uncertainty for more responsiveness
         float innovation = 0.0f;               // Innovation (measurement - prediction)
         float kalmanGain = 0.0f;              // Kalman gain
         bool initialized = false;
