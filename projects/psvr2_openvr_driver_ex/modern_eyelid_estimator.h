@@ -1,7 +1,6 @@
 #pragma once
 
 #include "hmd2_gaze.h"
-#include <map>
 #include <vector>
 #include <string>
 #include <cmath>
@@ -229,8 +228,8 @@ namespace psvr2_toolkit {
       AdaptiveReference openPosY;
       AdaptiveReference closedPosY;
       
-      // Learn different references for different gaze angles
-      std::map<int, AdaptiveReference> angleSpecificRefs;
+      // Learn different references for different gaze angles (simplified array approach)
+      AdaptiveReference angleSpecificRefs[10];  // 10 angle bins
       
       GazeAwareReferences() 
         : openDia(4.0f, 0.005f), closedDia(2.0f, 0.01f)
@@ -310,7 +309,7 @@ namespace psvr2_toolkit {
         // Learning parameters
         float learningRate = 0.01f;            // How fast to learn gaze patterns
         int minSamplesPerGaze = 50;            // Minimum samples before trusting pattern
-        std::map<int, float> learnedSquintFactors; // Learned squint factors per gaze bin
+        float learnedSquintFactors[10];         // Learned squint factors per gaze bin (simplified)
         
         // Update squint factor for specific gaze direction
         void UpdateSquintFactor(float gazeAngle, float observedSquint);
@@ -519,4 +518,4 @@ namespace psvr2_toolkit {
     
   };
 
-}
+} // namespace psvr2_toolkit

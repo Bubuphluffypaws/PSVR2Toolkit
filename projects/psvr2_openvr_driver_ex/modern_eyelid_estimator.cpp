@@ -221,10 +221,12 @@ namespace psvr2_toolkit {
     
     // Update angle-specific references
     int angleBin = static_cast<int>(gazeAngle * m_config.gazeAngleBins);
-    if (refs.angleSpecificRefs.find(angleBin) == refs.angleSpecificRefs.end()) {
-      refs.angleSpecificRefs[angleBin] = AdaptiveReference(eye.pupilDiaMm, 0.01f);
+    if (angleBin >= 0 && angleBin < 10) {  // Bounds check for array
+      if (refs.angleSpecificRefs[angleBin].sampleCount == 0) {
+        refs.angleSpecificRefs[angleBin] = AdaptiveReference(eye.pupilDiaMm, 0.01f);
+      }
+      refs.angleSpecificRefs[angleBin].Update(eye.pupilDiaMm, angleConfidence);
     }
-    refs.angleSpecificRefs[angleBin].Update(eye.pupilDiaMm, angleConfidence);
   }
 
   void ModernEyelidEstimator::UpdateNeutralGaze(const EyeData& leftEye, const EyeData& rightEye) {
@@ -408,7 +410,14 @@ namespace psvr2_toolkit {
     }
     
     // Apply gaze-dependent behavior compensation
-    if (m_gazeBehavior.learnedSquintFactors.size() > 0) {
+    bool hasLearnedFactors = false;
+    for (int i = 0; i < 10; i++) {
+      if (m_gazeBehavior.learnedSquintFactors[i] > 0.0f) {
+        hasLearnedFactors = true;
+        break;
+      }
+    }
+    if (hasLearnedFactors) {
       float gazeAngle = CalculateGazeAngle(eye.gazeDir);
       float squintFactor = m_gazeBehavior.GetSquintFactor(gazeAngle);
       compensatedOpenness = ApplySquintCompensation(compensatedOpenness, squintFactor);
@@ -421,24 +430,26 @@ namespace psvr2_toolkit {
   void ModernEyelidEstimator::EyeGeometryCalibrator::GazeDependentBehavior::UpdateSquintFactor(float gazeAngle, float observedSquint) {
     int gazeBin = static_cast<int>(gazeAngle * 10.0f);
     
-    // Initialize if not present
-    if (learnedSquintFactors.find(gazeBin) == learnedSquintFactors.end()) {
-      learnedSquintFactors[gazeBin] = 1.0f; // Start with neutral factor
+    // Bounds check for array
+    if (gazeBin >= 0 && gazeBin < 10) {
+      // Initialize if not set (sampleCount == 0 indicates uninitialized)
+      if (learnedSquintFactors[gazeBin] == 0.0f) {
+        learnedSquintFactors[gazeBin] = 1.0f; // Start with neutral factor
+      }
+      
+      // Update learned squint factor
+      float currentFactor = learnedSquintFactors[gazeBin];
+      float newFactor = currentFactor * (1.0f - learningRate) + observedSquint * learningRate;
+      learnedSquintFactors[gazeBin] = (newFactor < 0.1f) ? 0.1f : (newFactor > 2.0f) ? 2.0f : newFactor;
     }
-    
-    // Update learned squint factor
-    float currentFactor = learnedSquintFactors[gazeBin];
-    float newFactor = currentFactor * (1.0f - learningRate) + observedSquint * learningRate;
-    learnedSquintFactors[gazeBin] = std::clamp(newFactor, 0.1f, 2.0f);
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::GazeDependentBehavior::GetSquintFactor(float gazeAngle) const {
     int gazeBin = static_cast<int>(gazeAngle * 10.0f);
     
     // Return learned factor if available
-    auto it = learnedSquintFactors.find(gazeBin);
-    if (it != learnedSquintFactors.end()) {
-      return it->second;
+    if (gazeBin >= 0 && gazeBin < 10 && learnedSquintFactors[gazeBin] > 0.0f) {
+      return learnedSquintFactors[gazeBin];
     }
     
     // Fallback to directional factors
