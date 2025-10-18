@@ -195,25 +195,6 @@ namespace psvr2_toolkit {
     }
   }
 
-  float ModernEyelidEstimator::CalculateAdaptiveOcclusionThreshold(float gazeAngle) const {
-    // Calculate gaze-dependent occlusion threshold
-    // At center gaze (low angle): low threshold (any occlusion = closed)
-    // At edge gaze (high angle): high threshold (significant occlusion needed = closed)
-    
-    // Normalize gaze angle to 0-1 range (0 = center, 1 = extreme edge)
-    float normalizedAngle = (gazeAngle < 0.0f) ? 0.0f : (gazeAngle > 1.0f) ? 1.0f : gazeAngle;
-    
-    // Smooth transition between center and edge thresholds
-    float transitionFactor = normalizedAngle / m_config.occlusionTransitionRange;
-    transitionFactor = (transitionFactor < 0.0f) ? 0.0f : (transitionFactor > 1.0f) ? 1.0f : transitionFactor;
-    
-    // Interpolate between center and edge thresholds
-    float threshold = m_config.centerOcclusionThreshold * (1.0f - transitionFactor) + 
-                     m_config.edgeOcclusionThreshold * transitionFactor;
-    
-    return threshold;
-  }
-
   void ModernEyelidEstimator::UpdateReferences(const EyeData& eye, GazeAwareReferences& refs) {
     if (!eye.isValid) return;
     
@@ -263,19 +244,11 @@ namespace psvr2_toolkit {
       m_learnedNeutralGaze = avgGaze;
       m_neutralGazeConfidence = 0.1f;
     } else {
-      // Update using configurable learning rate
-      float learningRate = m_config.neutralGazeLearningRate;
-      
-      // Apply Y-bias if enabled (for headset mounting compensation)
-      Vector3 biasedAvgGaze = avgGaze;
-      if (m_config.enableNeutralGazeBias) {
-        biasedAvgGaze.y += m_config.neutralGazeBiasY;
-        biasedAvgGaze = biasedAvgGaze.Normalized();
-      }
-      
-      m_learnedNeutralGaze.x = m_learnedNeutralGaze.x * (1.0f - learningRate) + biasedAvgGaze.x * learningRate;
-      m_learnedNeutralGaze.y = m_learnedNeutralGaze.y * (1.0f - learningRate) + biasedAvgGaze.y * learningRate;
-      m_learnedNeutralGaze.z = m_learnedNeutralGaze.z * (1.0f - learningRate) + biasedAvgGaze.z * learningRate;
+      // Update using exponential moving average
+      float learningRate = std::min(0.01f, 1.0f / m_gazeSampleCount);
+      m_learnedNeutralGaze.x = m_learnedNeutralGaze.x * (1.0f - learningRate) + avgGaze.x * learningRate;
+      m_learnedNeutralGaze.y = m_learnedNeutralGaze.y * (1.0f - learningRate) + avgGaze.y * learningRate;
+      m_learnedNeutralGaze.z = m_learnedNeutralGaze.z * (1.0f - learningRate) + avgGaze.z * learningRate;
       
       // Normalize
       m_learnedNeutralGaze = m_learnedNeutralGaze.Normalized();
@@ -288,77 +261,7 @@ namespace psvr2_toolkit {
   float ModernEyelidEstimator::FuseCues(const std::vector<CueMeasurement>& cues) {
     if (cues.empty()) return 0.5f;
     
-    // Separate diameter and position cues for special handling
-    CueMeasurement diameterCue(0.5f, 1.0f, 0.0f, "none");
-    CueMeasurement positionCue(0.5f, 1.0f, 0.0f, "none");
-    bool hasDiameter = false, hasPosition = false;
-    
-    // Find diameter and position cues
-    for (const auto& cue : cues) {
-      if (cue.name == "diameter") {
-        diameterCue = cue;
-        hasDiameter = true;
-      } else if (cue.name == "position") {
-        positionCue = cue;
-        hasPosition = true;
-      }
-    }
-    
-    // Special edge pupil handling with gaze-dependent occlusion thresholds
-    if (hasDiameter && hasPosition) {
-      // Calculate gaze angle from diameter cue uncertainty (higher uncertainty = more extreme gaze)
-      float gazeAngle = diameterCue.uncertainty;
-      
-      // Calculate adaptive occlusion threshold based on gaze angle
-      float occlusionThreshold = CalculateAdaptiveOcclusionThreshold(gazeAngle);
-      
-      // Calculate base weights for both edge and center cases
-      float diameterWeight, positionWeight;
-      
-      if (gazeAngle > m_config.edgePupilThreshold) {
-        // At edges, reduce position cue influence and boost diameter cue
-        float edgeCompensation = m_config.edgePupilCompensation;
-        
-        // Adjust weights: more diameter, less position at edges
-        diameterWeight = m_config.minDiameterWeight + edgeCompensation;
-        positionWeight = m_config.maxPositionWeight - edgeCompensation;
-        
-        // Ensure weights sum to 1.0
-        float totalWeight = diameterWeight + positionWeight;
-        diameterWeight /= totalWeight;
-        positionWeight /= totalWeight;
-      } else {
-        // For center/normal gaze, use balanced weights
-        diameterWeight = 0.65f;  // Standard diameter weight
-        positionWeight = 0.35f;  // Standard position weight
-      }
-      
-      // Apply weighted fusion
-      float fusedValue = diameterWeight * diameterCue.value + positionWeight * positionCue.value;
-      
-      // Apply gaze-dependent occlusion threshold logic
-      if (fusedValue < occlusionThreshold) {
-        if (gazeAngle > m_config.edgePupilThreshold) {
-          // At edges, apply additional slack - even if below threshold, give more tolerance
-          float edgeSlack = m_config.edgeSlackFactor * (1.0f - gazeAngle); // More slack for more extreme angles
-          float slackThreshold = occlusionThreshold * (1.0f - edgeSlack);
-          
-          if (fusedValue < slackThreshold) {
-            // Only then consider it truly closed
-            fusedValue = fusedValue; // Keep the low value
-          } else {
-            // Apply edge bias to prevent false closure
-            float edgeBias = 0.15f * (1.0f - gazeAngle); // More bias for less extreme angles
-            fusedValue = fusedValue * (1.0f - edgeBias) + 0.6f * edgeBias; // Bias toward 0.6 (more open)
-          }
-        }
-        // For center gaze, any significant occlusion likely means closure (no additional slack)
-      }
-      
-      return (fusedValue < 0.0f) ? 0.0f : (fusedValue > 1.0f) ? 1.0f : fusedValue;
-    }
-    
-    // Standard uncertainty-based fusion for normal cases
+    // Weight by inverse uncertainty (higher confidence = higher weight)
     float weightedSum = 0.0f;
     float totalWeight = 0.0f;
     
