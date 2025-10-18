@@ -49,11 +49,8 @@ namespace psvr2_toolkit {
       return {openness, confidence, "blink"};
     }
     
-    // 5. Apply temporal smoothing (only for non-blink frames)
-    static float lastOpenness = 0.5f;
-    openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
-               openness * m_config.smoothingAlpha;
-    lastOpenness = openness;
+    // 5. Apply enhanced smoothing system (only for non-blink frames)
+    openness = m_smoothingSystem.Filter(openness, m_config.kalmanProcessNoise, m_config.kalmanMeasurementNoise);
     
     // 5. Calculate confidence
     float confidence = CalculateOverallConfidence(allCues);
@@ -114,7 +111,7 @@ namespace psvr2_toolkit {
     }
     
     // Apply enhanced smoothing system (only for non-blink frames)
-    openness = m_smoothingSystem.Filter(openness);
+    openness = m_smoothingSystem.Filter(openness, m_config.kalmanProcessNoise, m_config.kalmanMeasurementNoise);
     
     float confidence = CalculateOverallConfidence(cues);
     
@@ -141,12 +138,12 @@ namespace psvr2_toolkit {
     // Further normalize using gaze-aware references (secondary normalization)
     float denom = std::max(refs.openDia.value - refs.closedDia.value, 1e-6f);
     float refNormalizedDia = (correctedDia - refs.closedDia.value) / denom;
-    refNormalizedDia = (refNormalizedDia < 0.0f) ? 0.0f : (refNormalizedDia > 1.0f) ? 1.0f : refNormalizedDia;
+    refNormalizedDia = std::clamp(refNormalizedDia, 0.0f, 1.0f);
     
     // Blend dilation-normalized and reference-normalized values
     // Use dilation normalization as primary, reference as secondary
     float blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
-    blendedDia = (blendedDia < 0.0f) ? 0.0f : (blendedDia > 1.0f) ? 1.0f : blendedDia;
+    blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
     
     // Calculate uncertainty based on gaze angle, reference stability, and dilation consistency
     float gazeUncertainty = std::sin(gazeAngle);  // Higher angle = more uncertainty
@@ -163,7 +160,7 @@ namespace psvr2_toolkit {
     // Normalize position - standard logic: higher Y = more open eyes
     float denom = std::max(refs.openPosY.value - refs.closedPosY.value, 1e-6f);
     float normalizedPos = (eye.pupilPosY - refs.closedPosY.value) / denom;
-    normalizedPos = (normalizedPos < 0.0f) ? 0.0f : (normalizedPos > 1.0f) ? 1.0f : normalizedPos;
+    normalizedPos = std::clamp(normalizedPos, 0.0f, 1.0f);
     
     // Position is less affected by gaze angle than diameter
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
@@ -228,10 +225,10 @@ namespace psvr2_toolkit {
     } else if (IsNeutralGaze(eye.gazeDir)) {
       // Slower learning for open references, only at neutral gaze
       // Only update if we have a reasonable difference from closed reference
-      if ((eye.pupilDiaMm - refs.closedDia.value < 0) ? -eye.pupilDiaMm - refs.closedDia.value : eye.pupilDiaMm - refs.closedDia.value > 0.5f) {
+      if (std::abs(eye.pupilDiaMm - refs.closedDia.value) > 0.5f) {
         refs.openDia.Update(eye.pupilDiaMm, 0.3f * angleConfidence);
       }
-      if ((eye.pupilPosY - refs.closedPosY.value < 0) ? -eye.pupilPosY - refs.closedPosY.value : eye.pupilPosY - refs.closedPosY.value > 0.1f) {
+      if (std::abs(eye.pupilPosY - refs.closedPosY.value) > 0.1f) {
         refs.openPosY.Update(eye.pupilPosY, 0.3f * angleConfidence);
       }
     }
@@ -552,7 +549,7 @@ namespace psvr2_toolkit {
       return upGazeSquintFactor;
     } else if (gazeAngle < -0.3f) { // Looking down
       return downGazeSquintFactor;
-    } else if ((gazeAngle < 0) ? -gazeAngle : gazeAngle < 0.1f) { // Neutral
+    } else if (std::abs(gazeAngle) < 0.1f) { // Neutral
       return neutralGazeSquintFactor;
     } else { // Lateral
       return lateralGazeSquintFactor;
@@ -590,7 +587,7 @@ namespace psvr2_toolkit {
     float compensationFactor = 1.0f + (occlusionConfidence * compensationStrength);
     float compensatedOpenness = rawOpenness * compensationFactor;
     
-    return (compensatedOpenness < 0.0f) ? 0.0f : (compensatedOpenness > 1.0f) ? 1.0f : compensatedOpenness;
+    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
   }
 
   // Helper functions for eye geometry calibration
@@ -604,14 +601,14 @@ namespace psvr2_toolkit {
     // Estimate eye radius from pupil diameter and position
     // Typical eye radius is 12mm, pupil diameter varies 2-8mm
     float estimatedRadius = eye.pupilDiaMm * 3.0f; // Rough estimation
-    return (estimatedRadius < 8.0f) ? 8.0f : (estimatedRadius > 16.0f) ? 16.0f : estimatedRadius;
+    return std::clamp(estimatedRadius, 8.0f, 16.0f);
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateObservedSquint(const EyeData& eye, float openness) {
     // Calculate observed squint based on pupil dynamics
     // When squinting, pupil appears smaller and position changes
     float squintIndicator = 1.0f - (eye.pupilDiaMm / 4.0f); // Normalize to 0-1
-    return (squintIndicator < 0.0f) ? 0.0f : (squintIndicator > 1.0f) ? 1.0f : squintIndicator;
+    return std::clamp(squintIndicator, 0.0f, 1.0f);
   }
 
   Vector3 ModernEyelidEstimator::EyeGeometryCalibrator::CalculateExpectedPupilPosition(const Vector3& gazeDir, const EyeGeometry& geometry) {
@@ -634,22 +631,20 @@ namespace psvr2_toolkit {
     // Apply squint compensation to openness
     // Higher squint factor means more squinting, so openness should be reduced
     float compensatedOpenness = openness / squintFactor;
-    return (compensatedOpenness < 0.0f) ? 0.0f : (compensatedOpenness > 1.0f) ? 1.0f : compensatedOpenness;
+    return std::clamp(compensatedOpenness, 0.0f, 1.0f);
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::EstimateCurrentOpenness(const EyeData& eye) {
     // Estimate current openness for learning purposes
     // This is a simplified estimation - would use actual measurement in real implementation
-    float diameterOpenness = (eye.pupilDiaMm / 4.0f < 0.0f) ? 0.0f : (eye.pupilDiaMm / 4.0f > 1.0f) ? 1.0f : eye.pupilDiaMm / 4.0f;
-    float positionOpenness = (eye.pupilPosY < 0.0f) ? 0.0f : (eye.pupilPosY > 1.0f) ? 1.0f : eye.pupilPosY;
+    float diameterOpenness = std::clamp(eye.pupilDiaMm / 4.0f, 0.0f, 1.0f);
+    float positionOpenness = std::clamp(eye.pupilPosY, 0.0f, 1.0f);
     return (diameterOpenness + positionOpenness) * 0.5f;
   }
 
   float ModernEyelidEstimator::EyeGeometryCalibrator::CalculateGazeAngle(const Vector3& gazeDir) {
     // Calculate vertical gaze angle
-    float absY = (gazeDir.y < 0) ? -gazeDir.y : gazeDir.y;
-    float clampedY = (absY < 0.0f) ? 0.0f : (absY > 1.0f) ? 1.0f : absY;
-    return std::asin(clampedY);
+    return std::asin(std::clamp(std::abs(gazeDir.y), 0.0f, 1.0f));
   }
 
   // BlinkTweener implementation
