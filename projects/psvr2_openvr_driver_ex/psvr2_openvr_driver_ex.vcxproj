@@ -185,7 +185,7 @@
     <ClCompile Include="hmd_device_hooks.cpp" />
     <ClCompile Include="hmd_driver_factory.cpp" />
     <ClCompile Include="hmd_driver_loader.cpp" />
-    <ClCompile Include="headset_calibrator.cpp" />
+    <!-- <ClCompile Include="headset_calibrator.cpp" /> -->
     <ClCompile Include="ipc_server.cpp" />
     <ClCompile Include="modern_eyelid_estimator.cpp" />
     <ClCompile Include="original_eyelid_estimator.cpp" />
@@ -206,7 +206,7 @@
     <ClInclude Include="driver_host_proxy.h" />
     <ClInclude Include="hmd_device_hooks.h" />
     <ClInclude Include="hmd_driver_loader.h" />
-    <ClInclude Include="headset_calibrator.h" />
+    <!-- <ClInclude Include="headset_calibrator.h" /> -->
     <ClInclude Include="ipc_server.h" />
     <ClInclude Include="modern_eyelid_estimator.h" />
     <ClInclude Include="original_eyelid_estimator.h" />

@@ -523,8 +523,8 @@ namespace psvr2_toolkit {
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
     
     // Gaze angle utilities
-    float CalculateGazeAngle(const Vector3& gazeDir) const;
-    bool IsNeutralGaze(const Vector3& gazeDir) const;
+    float CalculateGazeAngle(const Vector3& gazeDir);
+    bool IsNeutralGaze(const Vector3& gazeDir);
     
     // Learning functions
     void UpdateReferences(const EyeData& eye, GazeAwareReferences& refs);
