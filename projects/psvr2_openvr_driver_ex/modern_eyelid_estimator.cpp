@@ -45,9 +45,7 @@ namespace psvr2_toolkit {
       openness = 0.0f; // Immediate eye closure on any blink
       // Skip all smoothing for instant blink response
       float confidence = CalculateOverallConfidence(allCues);
-      if (m_config.invertOutput) {
-        openness = 1.0f - openness;
-      }
+      // Don't apply invertOutput to blinks - they should always be closed
       return {openness, confidence, "blink"};
     }
     
@@ -98,9 +96,7 @@ namespace psvr2_toolkit {
       openness = 0.0f; // Immediate eye closure on blink
       // Skip all smoothing and augmentation for instant blink response
       float confidence = CalculateOverallConfidence(cues);
-      if (m_config.invertOutput) {
-        openness = 1.0f - openness;
-      }
+      // Don't apply invertOutput to blinks - they should always be closed
       return {openness, confidence, "blink"};
     }
     
