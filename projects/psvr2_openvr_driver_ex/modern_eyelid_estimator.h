@@ -148,57 +148,32 @@ namespace psvr2_toolkit {
         }
       } averaging;
       
-        // Kalman filter for optimal noise filtering
-        struct KalmanFilter {
-          float state = 0.5f;                    // Current state estimate
-          float covariance = 1.0f;               // State uncertainty
-          float innovation = 0.0f;               // Innovation (measurement - prediction)
-          float kalmanGain = 0.0f;              // Kalman gain
-          bool initialized = false;
-          
-          float Filter(float input, float processNoise, float measurementNoise) {
-            if (!initialized) {
-              state = input;
-              covariance = measurementNoise;
-              initialized = true;
-              return input;
-            }
-            
-            // Prediction step
-            float predictedState = state;  // No process model for eyelid tracking (state doesn't change on its own)
-            float predictedCovariance = covariance + processNoise;
-            
-            // Update step
-            innovation = input - predictedState;
-            float denominator = predictedCovariance + measurementNoise;
-            kalmanGain = (denominator > 1e-6f) ? predictedCovariance / denominator : 0.0f;  // Prevent division by zero
-            
-            state = predictedState + kalmanGain * innovation;
-            covariance = (1.0f - kalmanGain) * predictedCovariance;
-            
-            // Clamp state to valid range
-            state = std::clamp(state, 0.0f, 1.0f);
-            
-            return state;
-          }
-          
-          void Reset() {
-            state = 0.5f;
-            covariance = 1.0f;
-            innovation = 0.0f;
-            kalmanGain = 0.0f;
-            initialized = false;
-          }
-        } kalman;
+      // Kalman filter (placeholder for future implementation)
+      struct KalmanFilter {
+        float state = 0.5f;
+        float covariance = 1.0f;
+        float processNoise = 0.01f;
+        float measurementNoise = 0.1f;
+        
+        float Filter(float input) {
+          // Simple placeholder - just return input for now
+          return input;
+        }
+        
+        void Reset() {
+          state = 0.5f;
+          covariance = 1.0f;
+        }
+      } kalman;
       
-      float Filter(float input, float processNoise = 0.005f, float measurementNoise = 0.05f) {
+      float Filter(float input) {
         switch (method) {
           case SIMPLE_LOWPASS:
             return lowPass.Filter(input);
           case STRONG_AVERAGING:
             return averaging.Filter(input);
           case KALMAN_FILTER:
-            return kalman.Filter(input, processNoise, measurementNoise);
+            return kalman.Filter(input);
           default:
             return averaging.Filter(input);
         }
@@ -257,8 +232,8 @@ namespace psvr2_toolkit {
       AdaptiveReference angleSpecificRefs[10];  // 10 angle bins
       
       GazeAwareReferences() 
-        : openDia(4.5f, 0.005f), closedDia(1.8f, 0.01f)  // Increased openDia, decreased closedDia for better range
-        , openPosY(0.58f, 0.005f), closedPosY(0.42f, 0.01f) {}  // Increased range for better sensitivity
+        : openDia(4.0f, 0.005f), closedDia(2.0f, 0.01f)
+        , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {}
     } m_leftRefs, m_rightRefs;
     
     // Pupil dilation normalization system
@@ -425,7 +400,6 @@ namespace psvr2_toolkit {
       float smoothingAlpha = 0.05f;  // Reduced for more aggressive smoothing
       float minConfidence = 0.1f;
       bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
-      // NOTE: If output values seem too low (0.0-0.3 range), check if this needs to be false
       
       // Blink augmentation parameters - DISABLED for instant blinks
       bool enableBlinkAugmentation = false;    // Disabled - blinks should be instant, not gradual
@@ -445,18 +419,14 @@ namespace psvr2_toolkit {
       
       // Gaze-dependent occlusion thresholds
       float centerOcclusionThreshold = 0.3f;  // At center gaze, occlusion > 0.3 = closed
-      float edgeOcclusionThreshold = 0.8f;    // At edge gaze, occlusion > 0.8 = closed (increased from 0.7)
+      float edgeOcclusionThreshold = 0.7f;    // At edge gaze, occlusion > 0.7 = closed
       float occlusionTransitionRange = 0.4f;  // Range over which threshold transitions (0.4f = smooth transition)
-      float edgeSlackFactor = 0.3f;           // Additional slack for edge pupils (0.3f = 30% more tolerance, increased from 0.2)
+      float edgeSlackFactor = 0.2f;           // Additional slack for edge pupils (0.2f = 20% more tolerance)
       
       // Neutral gaze learning parameters
       float neutralGazeLearningRate = 0.001f;  // How fast to learn user's neutral gaze
       float neutralGazeBiasY = 0.0f;          // Bias toward upward gaze (positive = up, negative = down)
       bool enableNeutralGazeBias = false;     // Whether to apply Y-bias to learned neutral gaze
-      
-      // Kalman filter parameters
-      float kalmanProcessNoise = 0.005f;      // Process noise (how much state changes on its own)
-      float kalmanMeasurementNoise = 0.05f;   // Measurement noise (how much we trust each measurement)
     } m_config;
     
     // Private helper functions

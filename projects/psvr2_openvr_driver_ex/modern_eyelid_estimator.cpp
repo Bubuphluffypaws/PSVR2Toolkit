@@ -49,8 +49,11 @@ namespace psvr2_toolkit {
       return {openness, confidence, "blink"};
     }
     
-    // 5. Apply enhanced smoothing system (only for non-blink frames)
-    openness = m_smoothingSystem.Filter(openness, m_config.kalmanProcessNoise, m_config.kalmanMeasurementNoise);
+    // 5. Apply temporal smoothing (only for non-blink frames)
+    static float lastOpenness = 0.5f;
+    openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
+               openness * m_config.smoothingAlpha;
+    lastOpenness = openness;
     
     // 5. Calculate confidence
     float confidence = CalculateOverallConfidence(allCues);
@@ -111,7 +114,7 @@ namespace psvr2_toolkit {
     }
     
     // Apply enhanced smoothing system (only for non-blink frames)
-    openness = m_smoothingSystem.Filter(openness, m_config.kalmanProcessNoise, m_config.kalmanMeasurementNoise);
+    openness = m_smoothingSystem.Filter(openness);
     
     float confidence = CalculateOverallConfidence(cues);
     
