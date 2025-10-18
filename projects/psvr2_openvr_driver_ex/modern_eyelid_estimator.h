@@ -14,7 +14,7 @@ namespace psvr2_toolkit {
     Vector3(float x = 0, float y = 0, float z = 0) : x(x), y(y), z(z) {}
     
     float Magnitude() const {
-      return std::sqrt(x * x + y * y + z * z);
+      return sqrtf(x * x + y * y + z * z);
     }
     
     Vector3 Normalized() const {
@@ -131,7 +131,7 @@ namespace psvr2_toolkit {
         float Filter(float input) {
           buffer[currentIndex] = input;
           currentIndex = (currentIndex + 1) % BUFFER_SIZE;
-          sampleCount = std::min(sampleCount + 1, BUFFER_SIZE);
+          sampleCount = (sampleCount + 1 < BUFFER_SIZE) ? sampleCount + 1 : BUFFER_SIZE;
           
           float sum = 0.0f;
           for (int i = 0; i < sampleCount; ++i) {
@@ -217,7 +217,7 @@ namespace psvr2_toolkit {
         value = value * (1.0f - effectiveLR) + newValue * effectiveLR;
         
         // Update stability based on variance
-        float variance = std::abs(newValue - value);
+        float variance = (newValue - value < 0) ? -(newValue - value) : (newValue - value);
         stability = stability * 0.95f + (1.0f - variance) * 0.05f;
       }
     };
@@ -256,7 +256,7 @@ namespace psvr2_toolkit {
         
         // Normalize to 0-1 range based on current baseline
         float normalized = (rawDiameter - (baselineDilation - dilationRange)) / (2.0f * dilationRange);
-        return std::clamp(normalized, 0.0f, 1.0f);
+        return (normalized < 0.0f) ? 0.0f : (normalized > 1.0f) ? 1.0f : normalized;
       }
       
       // Update baseline based on recent measurements
@@ -268,13 +268,13 @@ namespace psvr2_toolkit {
                           newDiameter * adaptationRate;
         
         // Update dilation range based on variance
-        float variance = std::abs(newDiameter - baselineDilation);
+        float variance = (newDiameter - baselineDilation < 0) ? -(newDiameter - baselineDilation) : (newDiameter - baselineDilation);
         dilationRange = dilationRange * (1.0f - adaptationRate) + 
                        variance * adaptationRate;
         
         // Ensure reasonable bounds
-        baselineDilation = std::clamp(baselineDilation, 2.0f, 6.0f);
-        dilationRange = std::clamp(dilationRange, 0.5f, 2.0f);
+        baselineDilation = (baselineDilation < 2.0f) ? 2.0f : (baselineDilation > 6.0f) ? 6.0f : baselineDilation;
+        dilationRange = (dilationRange < 0.5f) ? 0.5f : (dilationRange > 2.0f) ? 2.0f : dilationRange;
       }
     } m_dilationNormalizer;
     
@@ -433,7 +433,7 @@ namespace psvr2_toolkit {
         float Filter(float input) {
           buffer[currentIndex] = input;
           currentIndex = (currentIndex + 1) % BUFFER_SIZE;
-          sampleCount = std::min(sampleCount + 1, BUFFER_SIZE);
+          sampleCount = (sampleCount + 1 < BUFFER_SIZE) ? sampleCount + 1 : BUFFER_SIZE;
           
           float sum = 0.0f;
           for (int i = 0; i < sampleCount; i++) {
