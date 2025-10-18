@@ -179,9 +179,6 @@ int CaesarUsbThreadGaze::poll() {
       initialized = true;
     }
     
-    // Update headset calibration
-    headsetCalibrator.UpdateCalibration(pGazeState->leftEye, pGazeState->rightEye);
-    
     // Configurable A/B Testing Implementation with Headset Calibration
     float leftEyelidOpenness, rightEyelidOpenness;
     

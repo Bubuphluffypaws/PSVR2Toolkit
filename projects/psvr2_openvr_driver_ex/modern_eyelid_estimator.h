@@ -517,24 +517,6 @@ namespace psvr2_toolkit {
       float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)
     } m_config;
     
-    // Cue measurement functions
-    CueMeasurement MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs);
-    CueMeasurement MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs);
-    CueMeasurement MeasureBlinkCue(const EyeData& eye);
-    
-    // Gaze angle utilities
-    float CalculateGazeAngle(const Vector3& gazeDir);
-    bool IsNeutralGaze(const Vector3& gazeDir);
-    
-    // Learning functions
-    void UpdateReferences(const EyeData& eye, GazeAwareReferences& refs);
-    void UpdateNeutralGaze(const EyeData& leftEye, const EyeData& rightEye);
-    
-    // Fusion and utility functions
-    float FuseCues(const std::vector<CueMeasurement>& cues);
-    float CalculateOverallConfidence(const std::vector<CueMeasurement>& cues);
-    std::string DeterminePrimaryCue(const std::vector<CueMeasurement>& cues);
-    
   };
 
 }
