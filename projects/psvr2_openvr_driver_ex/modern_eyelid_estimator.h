@@ -516,6 +516,6 @@ namespace psvr2_toolkit {
       float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)
     } m_config;
     
-  };
+  }; // class ModernEyelidEstimator
 
 } // namespace psvr2_toolkit
