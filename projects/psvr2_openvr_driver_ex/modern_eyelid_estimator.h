@@ -174,17 +174,21 @@ namespace psvr2_toolkit {
           
           // Update step
           innovation = input - predictedState;
-          kalmanGain = predictedCovariance / (predictedCovariance + measurementNoise);
+          float denominator = predictedCovariance + measurementNoise;
+          kalmanGain = (denominator > 1e-6f) ? predictedCovariance / denominator : 0.0f;  // Prevent division by zero
           
           state = predictedState + kalmanGain * innovation;
           covariance = (1.0f - kalmanGain) * predictedCovariance;
+          
+          // Clamp state to valid range
+          state = (state < 0.0f) ? 0.0f : (state > 1.0f) ? 1.0f : state;
           
           return state;
         }
         
         void Reset() {
           state = 0.5f;
-          covariance = 1.0f;
+          covariance = measurementNoise;  // Consistent with initialization
           innovation = 0.0f;
           kalmanGain = 0.0f;
           initialized = false;
