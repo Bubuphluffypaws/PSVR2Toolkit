@@ -2,6 +2,9 @@
 
 #include "hmd_driver_loader.h"
 #include "hmd_device_hooks.h"
+#include "eyelid_estimator.h"
+#include "original_eyelid_estimator.h"
+#include "modern_eyelid_estimator.h"
 #include "hmd2_gaze.h"
 #include "ipc_server.h"
 
@@ -28,6 +31,41 @@ void *(*CaesarUsbThread__dtor_CaesarUsbThread)(void *thisptr, char a2) = nullptr
 int (*CaesarUsbThread__read)(void *thisptr, uint8_t pipeId, char *buffer, size_t length) = nullptr;
 
 CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
+
+// Smoothing configuration - change these to test different methods
+static constexpr int SMOOTHING_METHOD = 1;  // 0=LowPass, 1=StrongAveraging(500ms), 2=Kalman
+static constexpr bool ENABLE_INDEPENDENT_EYES = true;  // Each eye tracks independently
+
+// A/B Testing configuration
+static constexpr bool ENABLE_AB_TESTING = false;  // Disabled - using modern implementation for both eyes
+static constexpr bool USE_NEW_IMPLEMENTATION_BOTH_EYES = true;  // Use modern implementation for both eyes
+
+// A/B Testing: True baseline vs modern implementation
+psvr2_toolkit::ModernEyelidEstimator leftEyelidEstimator;     // MODERN implementation for left eye
+psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implementation for right eye
+
+// Initialize smoothing methods
+void InitializeSmoothingMethods() {
+  // Use the public enum values directly
+  switch (SMOOTHING_METHOD) {
+    case 0: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
+      break;
+    case 1: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      break;
+    case 2: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
+      break;
+    default: 
+      leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
+      break;
+  }
+}
 
 void *j_CaesarUsbThreadGaze__dtor_CaesarUsbThreadGaze(CaesarUsbThreadGaze *thisptr, char a2) {
   thisptr->dtor_CaesarUsbThreadGaze();
@@ -133,7 +171,53 @@ int CaesarUsbThreadGaze::poll() {
   if (buffer[0] == GAZE_MAGIC_0 && buffer[1] == GAZE_MAGIC_1_STATE) {
     Hmd2GazeState *pGazeState = reinterpret_cast<Hmd2GazeState *>(buffer);
     HmdDeviceHooks::UpdateGaze(pGazeState, sizeof(Hmd2GazeState));
-    pIpcServer->UpdateGazeState(pGazeState);
+    
+    // Initialize smoothing methods (only once)
+    static bool initialized = false;
+    if (!initialized) {
+      InitializeSmoothingMethods();
+      initialized = true;
+    }
+    
+    // Configurable A/B Testing Implementation with Headset Calibration
+    float leftEyelidOpenness, rightEyelidOpenness;
+    
+    if (ENABLE_AB_TESTING && !USE_NEW_IMPLEMENTATION_BOTH_EYES) {
+      // A/B Testing Mode: Modern implementation for both eyes (since we changed leftEyelidEstimator to ModernEyelidEstimator)
+      // Left eye: Modern implementation
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      leftEyelidOpenness = leftResult.openness;
+      
+      // Right eye: Modern implementation
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      rightEyelidOpenness = rightResult.openness;
+    } else if (USE_NEW_IMPLEMENTATION_BOTH_EYES) {
+      // Modern Implementation for Both Eyes (simplified - no headset calibration)
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      
+      // Use individual eye estimation for independent movement
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      
+      leftEyelidOpenness = leftResult.openness;
+      rightEyelidOpenness = rightResult.openness;
+    } else {
+      // Fallback: Convert Hmd2GazeEye to EyeData and use modern estimators
+      psvr2_toolkit::EyeData leftEyeDataRaw = leftEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->leftEye);
+      psvr2_toolkit::EyeData rightEyeDataRaw = rightEyelidEstimator.ConvertFromHmd2Gaze(pGazeState->rightEye);
+      
+      // Use individual eye estimation for final fallback
+      psvr2_toolkit::EstimationResult leftResult = leftEyelidEstimator.Estimate(leftEyeDataRaw);
+      psvr2_toolkit::EstimationResult rightResult = rightEyelidEstimator.Estimate(rightEyeDataRaw);
+      
+      leftEyelidOpenness = leftResult.openness;
+      rightEyelidOpenness = rightResult.openness;
+    }
+    
+    pIpcServer->UpdateGazeState(pGazeState, leftEyelidOpenness, rightEyelidOpenness);
   }
 
   return 0;
