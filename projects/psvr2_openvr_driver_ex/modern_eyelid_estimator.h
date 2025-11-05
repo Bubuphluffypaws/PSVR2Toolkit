@@ -502,9 +502,9 @@ namespace psvr2_toolkit {
       float maxLearningRate = 0.05f;
       float neutralGazeThreshold = 0.95f;
       int gazeAngleBins = 10;  // Number of angle-specific reference bins
-      float smoothingAlpha = 0.1f;
-      float minConfidence = 0.1f;
-      bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
+      float smoothingAlpha = 0.2f;  // Increased for better responsiveness (was 0.1f)
+      float minConfidence = 0.05f;  // Lowered to be less restrictive (was 0.1f)
+      bool invertOutput = false;  // Set to true if output is inverted (false = normal, 1.0 = open, 0.0 = closed)
 
       // Blink augmentation parameters - DISABLED for instant blinks
       bool enableBlinkAugmentation = false;    // Disabled - blinks should be instant, not gradual
@@ -519,16 +519,16 @@ namespace psvr2_toolkit {
       // Adaptive learning parameters
       bool enableAdaptiveLearning = true;  // Enable automatic fast learning on detected changes
 
-      // Extreme gaze angle handling
-      bool disableEyelidEstimationAtExtremeGaze = true;  // Disable eyelid estimation at extreme gaze angles
-      float extremeGazeAngleThreshold = 0.52f;  // ~30 degrees vertical (radians)
-      float reducedConfidenceGazeThreshold = 0.35f;  // ~20 degrees - start reducing confidence
-      float extremeGazeConfidenceMultiplier = 0.0f;  // Set to 0.0 to fully disable at extreme angles
+      // Extreme gaze angle handling - TUNED for day-to-day robustness
+      bool disableEyelidEstimationAtExtremeGaze = true;  // Reduce confidence at extreme gaze angles
+      float extremeGazeAngleThreshold = 0.70f;  // ~40 degrees vertical (radians) - truly extreme
+      float reducedConfidenceGazeThreshold = 0.52f;  // ~30 degrees - start reducing confidence gradually
+      float extremeGazeConfidenceMultiplier = 0.5f;  // Reduce confidence but don't fully disable (was 0.0)
 
       // Directional gaze thresholds (asymmetric - up/down more restrictive than lateral)
-      float upGazeDisableThreshold = 0.42f;  // ~25 degrees up (upper eyelid occlusion is worst)
-      float downGazeDisableThreshold = 0.48f;  // ~29 degrees down
-      float lateralGazeDisableThreshold = 0.87f;  // ~60 degrees sideways (more permissive - "stink eye" is common!)
+      float upGazeDisableThreshold = 0.70f;  // ~40 degrees up (allow normal looking up)
+      float downGazeDisableThreshold = 0.70f;  // ~40 degrees down (allow normal looking down)
+      float lateralGazeDisableThreshold = 0.87f;  // ~50 degrees sideways (permissive - "stink eye" is common!)
 
       // Geometric compensation coordination
       bool pupilDiameterPrecompensated = true;  // True if HeadsetCalibrator already applied ellipticity correction
