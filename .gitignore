@@ -406,3 +406,6 @@ FodyWeavers.xsd
 # Test files and documentation
 projects/psvr2_openvr_driver_ex/tests/
 projects/psvr2_openvr_driver_ex/docs/
+
+# macOS
+.DS_Store
