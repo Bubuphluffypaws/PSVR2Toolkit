@@ -10,6 +10,8 @@
 #include "ipc_server.h"
 
 #include <cstdlib>
+#include <chrono>
+#include <windows.h>
 
 #include <winusb.h>
 
@@ -33,6 +35,13 @@ int (*CaesarUsbThread__read)(void *thisptr, uint8_t pipeId, char *buffer, size_t
 
 CaesarUsbThreadGaze *CaesarUsbThreadGaze::m_pInstance = nullptr;
 
+// Eye tracking logging globals
+static FILE* g_eyeTrackingLogFile = nullptr;
+static std::chrono::steady_clock::time_point g_loggingStartTime;
+static bool g_loggingActive = false;
+static const int LOG_DURATION_SECONDS = 180;
+static int g_framesSinceFlush = 0;
+
 // Smoothing configuration - change these to test different methods
 static constexpr int SMOOTHING_METHOD = 1;  // 0=LowPass, 1=StrongAveraging(500ms), 2=Kalman
 static constexpr bool ENABLE_INDEPENDENT_EYES = true;  // Each eye tracks independently
@@ -48,23 +57,166 @@ psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implemen
 // Headset calibrator for geometric compensation
 psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
 
+// Get the directory where the driver DLL is located
+static std::string GetDllDirectory() {
+  char dllPath[MAX_PATH];
+  HMODULE hModule = NULL;
+
+  // Get the handle to this DLL
+  if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         (LPCSTR)&GetDllDirectory,
+                         &hModule)) {
+    // Get the full path to the DLL
+    if (GetModuleFileNameA(hModule, dllPath, sizeof(dllPath)) > 0) {
+      // Find the last backslash to get the directory
+      std::string fullPath(dllPath);
+      size_t lastSlash = fullPath.find_last_of("\\/");
+      if (lastSlash != std::string::npos) {
+        return fullPath.substr(0, lastSlash);
+      }
+    }
+  }
+
+  // Fallback to current directory
+  return ".";
+}
+
+// Initialize eye tracking logging
+static void InitializeEyeTrackingLogging() {
+  if (g_eyeTrackingLogFile != nullptr || g_loggingActive) {
+    return; // Already initialized
+  }
+
+  // Get the DLL directory and construct log file path
+  std::string dllDir = GetDllDirectory();
+  std::string logFilePath = dllDir + "\\psvr2_eye_tracking_data.csv";
+
+  // Open file for writing (overwrite if exists)
+  errno_t err = fopen_s(&g_eyeTrackingLogFile, logFilePath.c_str(), "w");
+  if (err != 0 || g_eyeTrackingLogFile == nullptr) {
+    // Failed to open file - log will be disabled
+    return;
+  }
+
+  // Write CSV header
+  fprintf(g_eyeTrackingLogFile,
+    "timestamp_ms,"
+    "left_originX,left_originY,left_originZ,"
+    "left_dirX,left_dirY,left_dirZ,"
+    "left_pupilDia,"
+    "left_pupilPosX,left_pupilPosY,"
+    "left_guideX,left_guideY,"
+    "left_blink,"
+    "right_originX,right_originY,right_originZ,"
+    "right_dirX,right_dirY,right_dirZ,"
+    "right_pupilDia,"
+    "right_pupilPosX,right_pupilPosY,"
+    "right_guideX,right_guideY,"
+    "right_blink,"
+    "combined_originX,combined_originY,combined_originZ\n");
+
+  // Initialize timing
+  g_loggingStartTime = std::chrono::steady_clock::now();
+  g_loggingActive = true;
+  g_framesSinceFlush = 0;
+}
+
+// Log eye tracking data
+static void LogEyeTrackingData(const Hmd2GazeState* pGazeState) {
+  if (!g_loggingActive || g_eyeTrackingLogFile == nullptr) {
+    return;
+  }
+
+  // Check if logging duration has elapsed
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_loggingStartTime);
+  if (elapsed.count() >= LOG_DURATION_SECONDS) {
+    // Close the file and stop logging
+    if (g_eyeTrackingLogFile != nullptr) {
+      fclose(g_eyeTrackingLogFile);
+      g_eyeTrackingLogFile = nullptr;
+    }
+    g_loggingActive = false;
+    return;
+  }
+
+  // Calculate timestamp in milliseconds
+  auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_loggingStartTime);
+
+  // Log all fields in CSV format with high precision
+  fprintf(g_eyeTrackingLogFile,
+    "%.3f,"                                                    // timestamp_ms
+    "%.6f,%.6f,%.6f,"                                         // left_originX,Y,Z
+    "%.6f,%.6f,%.6f,"                                         // left_dirX,Y,Z
+    "%.6f,"                                                    // left_pupilDia
+    "%.6f,%.6f,"                                               // left_pupilPosX,Y
+    "%.6f,%.6f,"                                               // left_guideX,Y
+    "%d,"                                                      // left_blink
+    "%.6f,%.6f,%.6f,"                                         // right_originX,Y,Z
+    "%.6f,%.6f,%.6f,"                                         // right_dirX,Y,Z
+    "%.6f,"                                                    // right_pupilDia
+    "%.6f,%.6f,"                                               // right_pupilPosX,Y
+    "%.6f,%.6f,"                                               // right_guideX,Y
+    "%d,"                                                      // right_blink
+    "%.6f,%.6f,%.6f\n",                                       // combined_originX,Y,Z
+    (double)elapsedMs.count(),
+    // Left eye data
+    pGazeState->leftEye.gazeOriginMm.x,
+    pGazeState->leftEye.gazeOriginMm.y,
+    pGazeState->leftEye.gazeOriginMm.z,
+    pGazeState->leftEye.gazeDirNorm.x,
+    pGazeState->leftEye.gazeDirNorm.y,
+    pGazeState->leftEye.gazeDirNorm.z,
+    pGazeState->leftEye.pupilDiaMm,
+    pGazeState->leftEye.pupilPosInSensor.x,
+    pGazeState->leftEye.pupilPosInSensor.y,
+    pGazeState->leftEye.posGuide.x,
+    pGazeState->leftEye.posGuide.y,
+    pGazeState->leftEye.blink ? 1 : 0,
+    // Right eye data
+    pGazeState->rightEye.gazeOriginMm.x,
+    pGazeState->rightEye.gazeOriginMm.y,
+    pGazeState->rightEye.gazeOriginMm.z,
+    pGazeState->rightEye.gazeDirNorm.x,
+    pGazeState->rightEye.gazeDirNorm.y,
+    pGazeState->rightEye.gazeDirNorm.z,
+    pGazeState->rightEye.pupilDiaMm,
+    pGazeState->rightEye.pupilPosInSensor.x,
+    pGazeState->rightEye.pupilPosInSensor.y,
+    pGazeState->rightEye.posGuide.x,
+    pGazeState->rightEye.posGuide.y,
+    pGazeState->rightEye.blink ? 1 : 0,
+    // Combined gaze data
+    pGazeState->combinedGaze.gazeOriginMm.x,
+    pGazeState->combinedGaze.gazeOriginMm.y,
+    pGazeState->combinedGaze.gazeOriginMm.z);
+
+  // Flush the file every 60 frames to prevent data loss
+  g_framesSinceFlush++;
+  if (g_framesSinceFlush >= 60) {
+    fflush(g_eyeTrackingLogFile);
+    g_framesSinceFlush = 0;
+  }
+}
+
 // Initialize smoothing methods
 void InitializeSmoothingMethods() {
   // Use the public enum values directly
   switch (SMOOTHING_METHOD) {
-    case 0: 
+    case 0:
       leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
       rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::SIMPLE_LOWPASS);
       break;
-    case 1: 
+    case 1:
       leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
       rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
       break;
-    case 2: 
+    case 2:
       leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
       rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::KALMAN_FILTER);
       break;
-    default: 
+    default:
       leftEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
       rightEyelidEstimator.SetSmoothingMethod(psvr2_toolkit::ModernEyelidEstimator::SmoothingSystem::STRONG_AVERAGING);
       break;
@@ -143,6 +295,13 @@ CaesarUsbThreadGaze *CaesarUsbThreadGaze::Instance() {
 void CaesarUsbThreadGaze::dtor_CaesarUsbThreadGaze() {
   m_ppVTable = ppVTable;
   close();
+
+  // Clean up logging resources
+  if (g_eyeTrackingLogFile != nullptr) {
+    fclose(g_eyeTrackingLogFile);
+    g_eyeTrackingLogFile = nullptr;
+  }
+  g_loggingActive = false;
 }
 
 void CaesarUsbThreadGaze::close() {
@@ -175,6 +334,14 @@ int CaesarUsbThreadGaze::poll() {
   if (buffer[0] == GAZE_MAGIC_0 && buffer[1] == GAZE_MAGIC_1_STATE) {
     Hmd2GazeState *pGazeState = reinterpret_cast<Hmd2GazeState *>(buffer);
     HmdDeviceHooks::UpdateGaze(pGazeState, sizeof(Hmd2GazeState));
+
+    // Initialize eye tracking logging (only once)
+    if (!g_loggingActive && g_eyeTrackingLogFile == nullptr) {
+      InitializeEyeTrackingLogging();
+    }
+
+    // Log eye tracking data
+    LogEyeTrackingData(pGazeState);
 
     // Initialize smoothing methods (only once)
     static bool initialized = false;
@@ -261,8 +428,103 @@ int CaesarUsbThreadGaze::poll() {
       leftEyelidOpenness = leftResult.openness;
       rightEyelidOpenness = rightResult.openness;
     }
-    
+
     pIpcServer->UpdateGazeState(pGazeState, leftEyelidOpenness, rightEyelidOpenness);
+  }
+  else if (buffer[0] == GAZE_MAGIC_0 && buffer[1] == GAZE_MAGIC_1_RAW) {
+    // RAW packet detected - likely contains raw eye camera images!
+    static int rawPacketCount = 0;
+    static FILE* rawDumpFile = nullptr;
+
+    // Log detection (once)
+    if (rawPacketCount == 0) {
+      Util::DriverLog("[PSVR2Toolkit] RAW gaze packet detected! Size: %d bytes", result);
+
+      // Get DLL directory
+      char dllPath[MAX_PATH];
+      HMODULE hModule = nullptr;
+      if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+        GetModuleFileNameA(hModule, dllPath, MAX_PATH);
+        std::string dllDir(dllPath);
+        size_t lastSlash = dllDir.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+          dllDir = dllDir.substr(0, lastSlash);
+        }
+
+        // Open dump file
+        std::string dumpPath = dllDir + "\\psvr2_raw_gaze_packet.bin";
+        rawDumpFile = fopen(dumpPath.c_str(), "wb");
+        if (rawDumpFile) {
+          Util::DriverLog("[PSVR2Toolkit] Dumping RAW packet to: %s", dumpPath.c_str());
+          // Write first RAW packet to file
+          fwrite(buffer, 1, result, rawDumpFile);
+          fclose(rawDumpFile);
+          rawDumpFile = nullptr;
+        }
+      }
+    }
+
+    rawPacketCount++;
+
+    // Log statistics every 60 packets (~1 second at 60Hz)
+    if (rawPacketCount % 60 == 0) {
+      Util::DriverLog("[PSVR2Toolkit] Received %d RAW gaze packets (size: %d bytes)",
+                      rawPacketCount, result);
+    }
+  }
+  else if (buffer[0] == GAZE_MAGIC_0 && buffer[1] == GAZE_MAGIC_1_CAL) {
+    // CAL packet detected - likely contains calibrated/enhanced data
+    static int calPacketCount = 0;
+    static FILE* calDumpFile = nullptr;
+
+    // Log detection (once)
+    if (calPacketCount == 0) {
+      Util::DriverLog("[PSVR2Toolkit] CAL gaze packet detected! Size: %d bytes", result);
+
+      // Get DLL directory
+      char dllPath[MAX_PATH];
+      HMODULE hModule = nullptr;
+      if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+        GetModuleFileNameA(hModule, dllPath, MAX_PATH);
+        std::string dllDir(dllPath);
+        size_t lastSlash = dllDir.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+          dllDir = dllDir.substr(0, lastSlash);
+        }
+
+        // Open dump file
+        std::string dumpPath = dllDir + "\\psvr2_cal_gaze_packet.bin";
+        calDumpFile = fopen(dumpPath.c_str(), "wb");
+        if (calDumpFile) {
+          Util::DriverLog("[PSVR2Toolkit] Dumping CAL packet to: %s", dumpPath.c_str());
+          // Write first CAL packet to file
+          fwrite(buffer, 1, result, calDumpFile);
+          fclose(calDumpFile);
+          calDumpFile = nullptr;
+        }
+      }
+    }
+
+    calPacketCount++;
+
+    // Log statistics every 60 packets
+    if (calPacketCount % 60 == 0) {
+      Util::DriverLog("[PSVR2Toolkit] Received %d CAL gaze packets (size: %d bytes)",
+                      calPacketCount, result);
+    }
+  }
+  else if (buffer[0] == GAZE_MAGIC_0) {
+    // Unknown gaze packet type
+    static bool unknownLogged = false;
+    if (!unknownLogged) {
+      Util::DriverLog("[PSVR2Toolkit] Unknown gaze packet type: 0x%02X 0x%02X",
+                      (uint8_t)buffer[0], (uint8_t)buffer[1]);
+      unknownLogged = true;
+    }
   }
 
   return 0;
