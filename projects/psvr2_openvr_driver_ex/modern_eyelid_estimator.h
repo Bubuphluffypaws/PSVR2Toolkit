@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "hmd2_gaze.h"
 #include <vector>
 #include <string>
