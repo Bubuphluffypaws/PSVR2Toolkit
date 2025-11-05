@@ -70,6 +70,19 @@ namespace psvr2_toolkit {
     // Single eye estimation for A/B testing
     UpdateReferences(eye, m_leftRefs, m_leftEyeProfile);  // Use left refs for single eye
 
+    // Calculate gaze-based confidence multiplier
+    // At extreme gaze angles, eyelid estimation becomes unreliable due to anatomical occlusion
+    float gazeConfidenceMultiplier = CalculateGazeConfidenceMultiplier(eye.gazeDir);
+
+    // If gaze confidence is extremely low, return neutral/last known state
+    // This prevents false positives from pupil occlusion at extreme gaze angles
+    if (gazeConfidenceMultiplier < 0.01f && !eye.isBlink) {
+      // Return a neutral "open" state at extreme gaze angles
+      // Reasoning: It's very unlikely someone is squinting while looking far up/down/sideways
+      float neutralOpenness = m_config.invertOutput ? 0.1f : 0.9f;  // Mostly open
+      return {neutralOpenness, 0.0f, "extreme_gaze"};
+    }
+
     std::vector<CueMeasurement> cues;
     if (eye.isValid) {
       cues.push_back(MeasureDiameterCue(eye, m_leftRefs, m_leftEyeProfile));
@@ -78,7 +91,7 @@ namespace psvr2_toolkit {
         cues.push_back(MeasureBlinkCue(eye));
       }
     }
-    
+
     float openness = FuseCues(cues);
     
     // Update eye geometry calibration
@@ -118,6 +131,10 @@ namespace psvr2_toolkit {
 
     float confidence = CalculateOverallConfidence(cues);
 
+    // Apply gaze-based confidence reduction
+    // Even at non-extreme angles, reduce confidence proportionally
+    confidence *= gazeConfidenceMultiplier;
+
     // Apply inversion if needed
     if (m_config.invertOutput) {
       openness = 1.0f - openness;
@@ -130,12 +147,17 @@ namespace psvr2_toolkit {
     // Update dilation normalizer with raw diameter
     m_dilationNormalizer.UpdateBaseline(eye.pupilDiaMm);
 
-    // Correct for gaze angle ellipticity
-    float gazeAngle = CalculateGazeAngle(eye.gazeDir);
-    float correctionFactor = 1.0f / std::max(std::cos(gazeAngle), 0.1f);
-    float correctedDia = eye.pupilDiaMm * correctionFactor;
+    float correctedDia = eye.pupilDiaMm;
+
+    // Apply ellipticity correction ONLY if not already compensated by HeadsetCalibrator
+    if (!m_config.pupilDiameterPrecompensated) {
+      float gazeAngle = CalculateGazeAngle(eye.gazeDir);
+      float correctionFactor = 1.0f / std::max(std::cos(gazeAngle), 0.1f);
+      correctedDia *= correctionFactor;
+    }
 
     // Apply gaze-specific compensation from LUT
+    // Note: This is independent learning that happens after any geometric compensation
     float gazeCompensation = GetGazeCompensation(eye.gazeDir, refs);
     correctedDia *= gazeCompensation;
 
@@ -166,6 +188,7 @@ namespace psvr2_toolkit {
     blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
 
     // Calculate uncertainty based on gaze angle, reference stability, dilation consistency, and profile learning
+    float gazeAngle = CalculateGazeAngle(eye.gazeDir);
     float gazeUncertainty = std::sin(gazeAngle);  // Higher angle = more uncertainty
     float refUncertainty = (refs.openDia.stability + refs.closedDia.stability) * 0.5f;
     float dilationUncertainty = 1.0f - (m_dilationNormalizer.sampleCount > 100 ? 0.8f : 0.3f);
@@ -220,6 +243,55 @@ namespace psvr2_toolkit {
     float absY = (gazeDir.y < 0) ? -gazeDir.y : gazeDir.y;
     float clampedY = (absY < 0.0f) ? 0.0f : (absY > 1.0f) ? 1.0f : absY;
     return std::asin(clampedY);
+  }
+
+  float ModernEyelidEstimator::CalculateGazeConfidenceMultiplier(const Vector3& gazeDir) const {
+    if (!m_config.disableEyelidEstimationAtExtremeGaze) {
+      return 1.0f;  // Feature disabled, always return full confidence
+    }
+
+    // Separate vertical and horizontal components
+    float verticalAngle = std::asin(std::clamp(std::abs(gazeDir.y), 0.0f, 1.0f));
+    float horizontalAngle = std::asin(std::clamp(std::abs(gazeDir.x), 0.0f, 1.0f));
+
+    // Determine which threshold to use based on gaze direction
+    float effectiveThreshold;
+    float reducedThreshold;
+
+    // Check if looking primarily up or down (vertical dominates)
+    if (verticalAngle > horizontalAngle) {
+      // Vertical gaze - use asymmetric thresholds
+      if (gazeDir.y > 0) {
+        // Looking up - most restrictive (upper eyelid occlusion is worst)
+        effectiveThreshold = m_config.upGazeDisableThreshold;
+        reducedThreshold = m_config.upGazeDisableThreshold * 0.7f;  // Start reducing earlier
+      } else {
+        // Looking down
+        effectiveThreshold = m_config.downGazeDisableThreshold;
+        reducedThreshold = m_config.downGazeDisableThreshold * 0.75f;
+      }
+    } else {
+      // Lateral gaze - less restrictive
+      effectiveThreshold = m_config.lateralGazeDisableThreshold;
+      reducedThreshold = m_config.lateralGazeDisableThreshold * 0.8f;
+    }
+
+    // Calculate max angle (either vertical or horizontal, whichever is larger)
+    float maxAngle = std::max(verticalAngle, horizontalAngle);
+
+    // Beyond extreme threshold: return configured multiplier (often 0.0 to fully disable)
+    if (maxAngle >= effectiveThreshold) {
+      return m_config.extremeGazeConfidenceMultiplier;
+    }
+
+    // Between reduced and extreme: linear fade from 1.0 to extremeGazeConfidenceMultiplier
+    if (maxAngle >= reducedThreshold) {
+      float t = (maxAngle - reducedThreshold) / (effectiveThreshold - reducedThreshold);
+      return 1.0f - t * (1.0f - m_config.extremeGazeConfidenceMultiplier);
+    }
+
+    // Below reduced threshold: full confidence
+    return 1.0f;
   }
 
   bool ModernEyelidEstimator::IsNeutralGaze(const Vector3& gazeDir) {

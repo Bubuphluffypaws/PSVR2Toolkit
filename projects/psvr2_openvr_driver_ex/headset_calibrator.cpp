@@ -378,7 +378,7 @@ namespace psvr2_toolkit {
   }
 
   bool HeadsetCalibrator::DetectHeadsetAdjustment() {
-    if (m_gazeHistory.size() < m_config.adaptationWindow * 2 || 
+    if (m_gazeHistory.size() < m_config.adaptationWindow * 2 ||
         m_pupilPosHistory.size() < m_config.adaptationWindow * 2) {
       return false;
     }
@@ -391,7 +391,7 @@ namespace psvr2_toolkit {
     // Extract recent and older history
     std::vector<Vector3> recentGaze(m_gazeHistory.begin() + recentStart, m_gazeHistory.end());
     std::vector<Vector3> olderGaze(m_gazeHistory.begin() + olderStart, m_gazeHistory.begin() + recentStart);
-    
+
     std::vector<Vector3> recentPupilPos(m_pupilPosHistory.begin() + recentStart, m_pupilPosHistory.end());
     std::vector<Vector3> olderPupilPos(m_pupilPosHistory.begin() + olderStart, m_pupilPosHistory.begin() + recentStart);
 
@@ -399,11 +399,84 @@ namespace psvr2_toolkit {
     float gazeChange = CalculateChangeMagnitude(recentGaze, olderGaze);
     float pupilChange = CalculateChangeMagnitude(recentPupilPos, olderPupilPos);
 
+    // ADDITIONAL CHECK: Calculate variance to distinguish sustained gaze from mounting change
+    // Mounting change: Both windows have low variance (stable but different)
+    // Sustained gaze: Recent window has low variance, old window has high variance (normal use)
+    float recentGazeVariance = CalculateVariance(recentGaze);
+    float olderGazeVariance = CalculateVariance(olderGaze);
+    float recentPupilVariance = CalculateVariance(recentPupilPos);
+    float olderPupilVariance = CalculateVariance(olderPupilPos);
+
     // Detect significant changes that might indicate headset adjustment
     bool significantGazeChange = gazeChange > m_config.changeThreshold;
     bool significantPupilChange = pupilChange > m_config.changeThreshold;
 
-    return significantGazeChange || significantPupilChange;
+    // ANTI-FALSE-TRIGGER: Use variance to distinguish mounting change from sustained gaze
+    //
+    // Mounting change: User was looking around normally (high variance), then headset shifted,
+    //                  now user still looking around normally (high variance), but offset
+    //                  OR: User was stable (low var), headset shifted, user stable at new pos (low var)
+    //
+    // Sustained gaze: User was looking around (high variance), then locked onto target (low variance recent)
+    //                 This should NOT trigger - it's just gameplay!
+    //
+    // Edge case: Initial calibration has ZERO variance (perfectly stable). If user then starts moving,
+    //            that's NOT a mounting change, it's just normal use starting.
+    //
+    // Key insight: If OLD window has HIGH variance but RECENT window has LOW variance,
+    //              that's sustained gaze (NOT mounting change). Only trigger if BOTH are similar variance.
+
+    // Special handling: If either window has near-zero variance, require BOTH to have near-zero
+    const float nearZeroThreshold = 0.001f;  // Gaze variance threshold
+    const float nearZeroThresholdPupil = 0.0001f;  // Pupil variance threshold
+
+    bool bothGazeNearZero = (recentGazeVariance < nearZeroThreshold) && (olderGazeVariance < nearZeroThreshold);
+    bool bothPupilNearZero = (recentPupilVariance < nearZeroThresholdPupil) && (olderPupilVariance < nearZeroThresholdPupil);
+
+    // Only calculate ratio if both windows have meaningful variance
+    float gazeVarianceRatio = 1.0f;
+    float pupilVarianceRatio = 1.0f;
+    bool similarVarianceGaze = false;
+    bool similarVariancePupil = false;
+
+    if (bothGazeNearZero) {
+      // Both windows stable - could be mounting change if averages different
+      similarVarianceGaze = true;
+    } else if (olderGazeVariance < nearZeroThreshold || recentGazeVariance < nearZeroThreshold) {
+      // One stable, one moving - NOT a mounting change (user started/stopped moving)
+      similarVarianceGaze = false;
+    } else {
+      // Both have meaningful variance - check ratio
+      gazeVarianceRatio = recentGazeVariance / olderGazeVariance;
+      similarVarianceGaze = (gazeVarianceRatio > 0.4f) && (gazeVarianceRatio < 2.5f);
+    }
+
+    if (bothPupilNearZero) {
+      similarVariancePupil = true;
+    } else if (olderPupilVariance < nearZeroThresholdPupil || recentPupilVariance < nearZeroThresholdPupil) {
+      similarVariancePupil = false;
+    } else {
+      pupilVarianceRatio = recentPupilVariance / olderPupilVariance;
+      similarVariancePupil = (pupilVarianceRatio > 0.4f) && (pupilVarianceRatio < 2.5f);
+    }
+
+    // Trigger only if change is significant AND variance pattern matches mounting change
+    bool likelyMountingChange = (significantGazeChange && similarVarianceGaze) ||
+                                (significantPupilChange && similarVariancePupil);
+
+    // DEBUG OUTPUT (can be disabled in production)
+    #ifdef DEBUG_SACCADE_PROTECTION
+    if (significantGazeChange || significantPupilChange) {
+      printf("DetectHeadsetAdjustment: gazeChange=%.4f pupilChange=%.4f\n", gazeChange, pupilChange);
+      printf("  Gaze variance: recent=%.6f older=%.6f ratio=%.4f (similar=%d)\n",
+             recentGazeVariance, olderGazeVariance, gazeVarianceRatio, similarVarianceGaze);
+      printf("  Pupil variance: recent=%.6f older=%.6f ratio=%.4f (similar=%d)\n",
+             recentPupilVariance, olderPupilVariance, pupilVarianceRatio, similarVariancePupil);
+      printf("  Result: %s\n", likelyMountingChange ? "TRIGGER" : "IGNORE");
+    }
+    #endif
+
+    return likelyMountingChange;
   }
 
   void HeadsetCalibrator::AdaptToHeadsetChange() {
@@ -464,6 +537,32 @@ namespace psvr2_toolkit {
     );
 
     return change.Magnitude();
+  }
+
+  float HeadsetCalibrator::CalculateVariance(const std::vector<Vector3>& history) const {
+    if (history.empty()) {
+      return 0.0f;
+    }
+
+    // Calculate mean
+    Vector3 mean(0, 0, 0);
+    for (const auto& vec : history) {
+      mean.x += vec.x;
+      mean.y += vec.y;
+      mean.z += vec.z;
+    }
+    mean.x /= history.size();
+    mean.y /= history.size();
+    mean.z /= history.size();
+
+    // Calculate variance (average of squared distances from mean)
+    float variance = 0.0f;
+    for (const auto& vec : history) {
+      Vector3 diff(vec.x - mean.x, vec.y - mean.y, vec.z - mean.z);
+      variance += diff.Magnitude() * diff.Magnitude();
+    }
+
+    return variance / history.size();
   }
 
 }

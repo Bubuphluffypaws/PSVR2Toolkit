@@ -514,6 +514,20 @@ namespace psvr2_toolkit {
 
       // Adaptive learning parameters
       bool enableAdaptiveLearning = true;  // Enable automatic fast learning on detected changes
+
+      // Extreme gaze angle handling
+      bool disableEyelidEstimationAtExtremeGaze = true;  // Disable eyelid estimation at extreme gaze angles
+      float extremeGazeAngleThreshold = 0.52f;  // ~30 degrees vertical (radians)
+      float reducedConfidenceGazeThreshold = 0.35f;  // ~20 degrees - start reducing confidence
+      float extremeGazeConfidenceMultiplier = 0.0f;  // Set to 0.0 to fully disable at extreme angles
+
+      // Directional gaze thresholds (asymmetric - up/down more restrictive than lateral)
+      float upGazeDisableThreshold = 0.42f;  // ~25 degrees up (upper eyelid occlusion is worst)
+      float downGazeDisableThreshold = 0.48f;  // ~29 degrees down
+      float lateralGazeDisableThreshold = 0.87f;  // ~60 degrees sideways (more permissive - "stink eye" is common!)
+
+      // Geometric compensation coordination
+      bool pupilDiameterPrecompensated = true;  // True if HeadsetCalibrator already applied ellipticity correction
     } m_config;
     
     // Private helper functions
@@ -527,6 +541,7 @@ namespace psvr2_toolkit {
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
     float CalculateGazeAngle(const Vector3& gazeDir) const;
     bool IsNeutralGaze(const Vector3& gazeDir);
+    float CalculateGazeConfidenceMultiplier(const Vector3& gazeDir) const;
 
     // Gaze LUT helper functions
     void UpdateGazeLUT(const Vector3& gazeDir, float observedCompensation, GazeAwareReferences& refs);

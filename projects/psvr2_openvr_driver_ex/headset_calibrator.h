@@ -97,6 +97,7 @@ namespace psvr2_toolkit {
     bool DetectHeadsetAdjustment();
     void AdaptToHeadsetChange();
     float CalculateChangeMagnitude(const std::vector<Vector3>& recentHistory, const std::vector<Vector3>& olderHistory) const;
+    float CalculateVariance(const std::vector<Vector3>& history) const;
     
     // Utility functions
     Vector3 ConvertFromHmd2Gaze(const Hmd2GazeEye& eye) const;
