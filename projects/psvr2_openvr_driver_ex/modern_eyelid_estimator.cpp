@@ -176,15 +176,9 @@ namespace psvr2_toolkit {
     float refNormalizedDia = (correctedDia - refs.closedDia.value) / denom;
     refNormalizedDia = std::clamp(refNormalizedDia, 0.0f, 1.0f);
 
-    // Blend all normalization methods with adaptive weighting
-    float blendedDia;
-    if (profile.isProfileLearned) {
-      // Use profile-based normalization as primary when available
-      blendedDia = profileNormalizedDia * 0.5f + normalizedDia * 0.3f + refNormalizedDia * 0.2f;
-    } else {
-      // Fall back to dilation + reference when profile not yet learned
-      blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
-    }
+    // Blend all normalization methods - TUNED for squint detection dynamic range
+    // Use 100% reference-based to preserve variation (profile normalization breaks with no range)
+    float blendedDia = refNormalizedDia;
     blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
 
     // Calculate uncertainty based on gaze angle, reference stability, dilation consistency, and profile learning
@@ -215,13 +209,8 @@ namespace psvr2_toolkit {
     float compensatedPos = refNormalizedPos * gazeCompensation;
     compensatedPos = std::clamp(compensatedPos, 0.0f, 1.0f);
 
-    // Blend profile-based and reference-based normalization
-    float normalizedPos;
-    if (profile.isProfileLearned) {
-      normalizedPos = profileNormalizedPos * 0.6f + compensatedPos * 0.4f;
-    } else {
-      normalizedPos = compensatedPos;
-    }
+    // Use 100% reference-based to preserve variation (profile normalization breaks with no range)
+    float normalizedPos = compensatedPos;
     normalizedPos = std::clamp(normalizedPos, 0.0f, 1.0f);
 
     // Position is less affected by gaze angle than diameter
@@ -334,22 +323,22 @@ namespace psvr2_toolkit {
                               (m_fastLearningState.fastLearningRate / m_fastLearningState.originalLearningRate) : 1.0f;
 
     if (eye.isBlink) {
-      // Fast learning for closed references when blinking
-      float blinkLearningRate = 0.8f * learningMultiplier;
-      blinkLearningRate = std::min(blinkLearningRate, 0.95f);  // Cap at 95%
+      // Moderate learning for closed references when blinking - TUNED for dynamic range
+      float blinkLearningRate = 0.15f * learningMultiplier;  // Reduced from 0.8 to preserve range
+      blinkLearningRate = std::min(blinkLearningRate, 0.3f);  // Cap at 30% (was 95%)
       refs.closedDia.Update(eye.pupilDiaMm, blinkLearningRate);
       refs.closedPosY.Update(eye.pupilPosY, blinkLearningRate);
     } else if (IsNeutralGaze(eye.gazeDir)) {
-      // Slower learning for open references, only at neutral gaze
+      // Very slow learning for open references - TUNED for squint detection
       // Only update if we have a reasonable difference from closed reference
       if (std::abs(eye.pupilDiaMm - refs.closedDia.value) > 0.5f) {
-        float openLearningRate = 0.3f * angleConfidence * learningMultiplier;
-        openLearningRate = std::min(openLearningRate, 0.8f);  // Cap at 80%
+        float openLearningRate = 0.02f * angleConfidence * learningMultiplier;  // Reduced from 0.3 to 0.02
+        openLearningRate = std::min(openLearningRate, 0.1f);  // Cap at 10% (was 80%)
         refs.openDia.Update(eye.pupilDiaMm, openLearningRate);
       }
       if (std::abs(eye.pupilPosY - refs.closedPosY.value) > 0.1f) {
-        float openLearningRate = 0.3f * angleConfidence * learningMultiplier;
-        openLearningRate = std::min(openLearningRate, 0.8f);  // Cap at 80%
+        float openLearningRate = 0.02f * angleConfidence * learningMultiplier;  // Reduced from 0.3 to 0.02
+        openLearningRate = std::min(openLearningRate, 0.1f);  // Cap at 10% (was 80%)
         refs.openPosY.Update(eye.pupilPosY, openLearningRate);
       }
     }
@@ -902,6 +891,14 @@ namespace psvr2_toolkit {
     }
 
     return baseCompensation;
+  }
+
+  void ModernEyelidEstimator::GetReferencesForDebug(int eyeIndex, float& openDia, float& closedDia, float& openPosY, float& closedPosY) const {
+    const GazeAwareReferences& refs = (eyeIndex == 0) ? m_leftRefs : m_rightRefs;
+    openDia = refs.openDia.value;
+    closedDia = refs.closedDia.value;
+    openPosY = refs.openPosY.value;
+    closedPosY = refs.closedPosY.value;
   }
 
 }

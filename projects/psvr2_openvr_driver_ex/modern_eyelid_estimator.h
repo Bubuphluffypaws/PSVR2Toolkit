@@ -97,6 +97,9 @@ namespace psvr2_toolkit {
     void DisableFastLearningMode();
     bool DetectSignificantChange(const EyeData& eye);
 
+    // Debug helper to inspect learned references
+    void GetReferencesForDebug(int eyeIndex, float& openDia, float& closedDia, float& openPosY, float& closedPosY) const;
+
     // Enhanced smoothing system with multiple options
     struct SmoothingSystem {
       enum SmoothingMethod {
@@ -129,9 +132,10 @@ namespace psvr2_toolkit {
         }
       } lowPass;
       
-      // Strong averaging (moving average)
+      // Strong averaging (moving average) with outlier rejection
       struct StrongAveraging {
-        static constexpr int BUFFER_SIZE = 30;   // Average over 30 samples (~500ms at 60fps)
+        static constexpr int BUFFER_SIZE = 30;   // Average over 30 samples (~500ms at 60fps) for smooth output
+        static constexpr float OUTLIER_THRESHOLD = 0.20f;  // Reject single-frame spikes >20% from recent average (blocks extreme noise, allows squinting)
         float buffer[BUFFER_SIZE];
         int currentIndex = 0;
         int sampleCount = 0;
@@ -144,17 +148,65 @@ namespace psvr2_toolkit {
         }
 
         float Filter(float input) {
-          buffer[currentIndex] = input;
+          // Outlier rejection: compare against RECENT samples (last 5), not full buffer
+          // This allows gradual trends while blocking single-frame noise spikes
+          float filteredInput = input;
+          if (sampleCount >= 5) {
+            // Get average of last 5 samples for comparison
+            float recentSum = 0.0f;
+            int recentCount = std::min(5, sampleCount);
+            for (int i = 0; i < recentCount; ++i) {
+              int idx = (currentIndex - 1 - i + BUFFER_SIZE) % BUFFER_SIZE;
+              recentSum += buffer[idx];
+            }
+            float recentAvg = recentSum / recentCount;
+
+            float deviation = std::abs(input - recentAvg);
+            if (deviation > OUTLIER_THRESHOLD) {
+              // Reject outlier - use recent average instead
+              filteredInput = recentAvg;
+            }
+          }
+
+          buffer[currentIndex] = filteredInput;
           currentIndex = (currentIndex + 1) % BUFFER_SIZE;
           sampleCount = (sampleCount + 1 < BUFFER_SIZE) ? sampleCount + 1 : BUFFER_SIZE;
-          
+
           float sum = 0.0f;
           for (int i = 0; i < sampleCount; ++i) {
             sum += buffer[i];
           }
           return sum / sampleCount;
         }
-        
+
+        float CalculateMedian() const {
+          if (sampleCount == 0) return 0.5f;
+
+          // Copy buffer for sorting (don't modify original)
+          float sorted[BUFFER_SIZE];
+          for (int i = 0; i < sampleCount; ++i) {
+            sorted[i] = buffer[i];
+          }
+
+          // Simple bubble sort (fine for small arrays)
+          for (int i = 0; i < sampleCount - 1; ++i) {
+            for (int j = 0; j < sampleCount - i - 1; ++j) {
+              if (sorted[j] > sorted[j + 1]) {
+                float temp = sorted[j];
+                sorted[j] = sorted[j + 1];
+                sorted[j + 1] = temp;
+              }
+            }
+          }
+
+          // Return median
+          if (sampleCount % 2 == 0) {
+            return (sorted[sampleCount/2 - 1] + sorted[sampleCount/2]) / 2.0f;
+          } else {
+            return sorted[sampleCount/2];
+          }
+        }
+
         void Reset() {
           currentIndex = 0;
           sampleCount = 0;
@@ -308,8 +360,8 @@ namespace psvr2_toolkit {
       int gazeLUTSampleCount[GAZE_LUT_SIZE_V][GAZE_LUT_SIZE_H];
 
       GazeAwareReferences()
-        : openDia(4.0f, 0.005f), closedDia(2.0f, 0.01f)
-        , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {
+        : openDia(3.5f, 0.005f), closedDia(1.5f, 0.01f)  // Realistic starting values for squint detection
+        , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {  // Realistic position range
         // Initialize LUT with neutral values
         for (int v = 0; v < GAZE_LUT_SIZE_V; v++) {
           for (int h = 0; h < GAZE_LUT_SIZE_H; h++) {
@@ -511,7 +563,7 @@ namespace psvr2_toolkit {
       float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
 
       // Eye geometry calibration parameters
-      bool enableEyeGeometryCalibration = true; // Whether to use adaptive eye geometry calibration
+      bool enableEyeGeometryCalibration = false; // Disabled to preserve squint detection dynamic range
       bool enableGazeDependentBehavior = true;   // Whether to model gaze-dependent eyelid behavior
       bool enablePupilOcclusionCompensation = true; // Whether to compensate for pupil occlusion
       float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)

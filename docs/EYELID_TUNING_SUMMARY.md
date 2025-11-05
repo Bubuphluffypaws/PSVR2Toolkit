@@ -92,13 +92,17 @@ float minConfidence = 0.05f;      // Less restrictive, allow more cues through
 
 ## TEST SUITE COMPATIBILITY NOTE
 
-**Important:** The existing test suites (`test_eyelid_calibration.cpp`, `test_extreme_scenarios.cpp`, etc.)
-were written when `invertOutput=true` was the expected behavior. These tests expect "closedness" values
-(inverted format where 0=open, 1=closed).
+**UPDATED:** All test suites have been updated to expect the correct non-inverted output format:
+- `test_eyelid_calibration.cpp` - Updated all expectations (1.0 = open, 0.0 = closed)
+- `test_extreme_scenarios.cpp` - Updated validation logic
+- `test_adaptive_response.cpp` - Updated adaptive behavior checks
 
-**Test failures in these suites are EXPECTED and DO NOT indicate real-world bugs.**
+All tests now use the standard format:
+- **1.0 = Fully Open Eyes** ✓
+- **0.0 = Fully Closed Eyes** ✓
+- Range: 0.0 to 1.0 (continuous)
 
-The real-world behavior (validated above) is correct for:
+This matches the real-world integration:
 - IPC server (`ipc_server.cpp`)
 - USB gaze thread (`usb_thread_gaze.cpp`)
 - OpenVR integration
