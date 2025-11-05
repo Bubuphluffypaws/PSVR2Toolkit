@@ -13,25 +13,25 @@ namespace psvr2_toolkit {
   EstimationResult ModernEyelidEstimator::Estimate(const EyeData& leftEye, const EyeData& rightEye) {
     // 1. Update learning state
     UpdateNeutralGaze(leftEye, rightEye);
-    UpdateReferences(leftEye, m_leftRefs);
-    UpdateReferences(rightEye, m_rightRefs);
-    
+    UpdateReferences(leftEye, m_leftRefs, m_leftEyeProfile);
+    UpdateReferences(rightEye, m_rightRefs, m_rightEyeProfile);
+
     // 2. Measure all cues for both eyes
     std::vector<CueMeasurement> allCues;
-    
+
     // Left eye cues
     if (leftEye.isValid) {
-      allCues.push_back(MeasureDiameterCue(leftEye, m_leftRefs));
-      allCues.push_back(MeasurePositionCue(leftEye, m_leftRefs));
+      allCues.push_back(MeasureDiameterCue(leftEye, m_leftRefs, m_leftEyeProfile));
+      allCues.push_back(MeasurePositionCue(leftEye, m_leftRefs, m_leftEyeProfile));
       if (leftEye.isBlink) {
         allCues.push_back(MeasureBlinkCue(leftEye));
       }
     }
-    
+
     // Right eye cues
     if (rightEye.isValid) {
-      allCues.push_back(MeasureDiameterCue(rightEye, m_rightRefs));
-      allCues.push_back(MeasurePositionCue(rightEye, m_rightRefs));
+      allCues.push_back(MeasureDiameterCue(rightEye, m_rightRefs, m_rightEyeProfile));
+      allCues.push_back(MeasurePositionCue(rightEye, m_rightRefs, m_rightEyeProfile));
       if (rightEye.isBlink) {
         allCues.push_back(MeasureBlinkCue(rightEye));
       }
@@ -50,10 +50,10 @@ namespace psvr2_toolkit {
     }
     
     // 5. Apply temporal smoothing (only for non-blink frames)
-    static float lastOpenness = 0.5f;
-    openness = lastOpenness * (1.0f - m_config.smoothingAlpha) + 
+    // FIXED: Changed from static to member variable to prevent cross-instance contamination
+    openness = m_lastOpenness * (1.0f - m_config.smoothingAlpha) +
                openness * m_config.smoothingAlpha;
-    lastOpenness = openness;
+    m_lastOpenness = openness;
     
     // 5. Calculate confidence
     float confidence = CalculateOverallConfidence(allCues);
@@ -68,12 +68,12 @@ namespace psvr2_toolkit {
 
   EstimationResult ModernEyelidEstimator::Estimate(const EyeData& eye) {
     // Single eye estimation for A/B testing
-    UpdateReferences(eye, m_leftRefs);  // Use left refs for single eye
-    
+    UpdateReferences(eye, m_leftRefs, m_leftEyeProfile);  // Use left refs for single eye
+
     std::vector<CueMeasurement> cues;
     if (eye.isValid) {
-      cues.push_back(MeasureDiameterCue(eye, m_leftRefs));
-      cues.push_back(MeasurePositionCue(eye, m_leftRefs));
+      cues.push_back(MeasureDiameterCue(eye, m_leftRefs, m_leftEyeProfile));
+      cues.push_back(MeasurePositionCue(eye, m_leftRefs, m_leftEyeProfile));
       if (eye.isBlink) {
         cues.push_back(MeasureBlinkCue(eye));
       }
@@ -115,60 +115,98 @@ namespace psvr2_toolkit {
     
     // Apply enhanced smoothing system (only for non-blink frames)
     openness = m_smoothingSystem.Filter(openness);
-    
+
     float confidence = CalculateOverallConfidence(cues);
-    
+
     // Apply inversion if needed
     if (m_config.invertOutput) {
       openness = 1.0f - openness;
     }
-    
+
     return {openness, confidence, DeterminePrimaryCue(cues)};
   }
 
-  CueMeasurement ModernEyelidEstimator::MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs) {
+  CueMeasurement ModernEyelidEstimator::MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs, EyeShapeProfile& profile) {
     // Update dilation normalizer with raw diameter
     m_dilationNormalizer.UpdateBaseline(eye.pupilDiaMm);
-    
+
     // Correct for gaze angle ellipticity
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
     float correctionFactor = 1.0f / std::max(std::cos(gazeAngle), 0.1f);
     float correctedDia = eye.pupilDiaMm * correctionFactor;
-    
+
+    // Apply gaze-specific compensation from LUT
+    float gazeCompensation = GetGazeCompensation(eye.gazeDir, refs);
+    correctedDia *= gazeCompensation;
+
+    // BUGFIX: Update profile with CORRECTED diameter, not raw
+    // This prevents mismatch between what we track and what we normalize
+    profile.UpdateProfile(correctedDia, eye.pupilPosY, eye.isBlink);
+
     // Apply pupil dilation normalization
     float normalizedDia = m_dilationNormalizer.NormalizeDiameter(correctedDia);
-    
-    // Further normalize using gaze-aware references (secondary normalization)
+
+    // Use adaptive eye shape profile for normalization if available
+    float profileNormalizedDia = profile.NormalizePupilDia(correctedDia);
+
+    // Further normalize using gaze-aware references (tertiary normalization)
     float denom = std::max(refs.openDia.value - refs.closedDia.value, 1e-6f);
     float refNormalizedDia = (correctedDia - refs.closedDia.value) / denom;
     refNormalizedDia = std::clamp(refNormalizedDia, 0.0f, 1.0f);
-    
-    // Blend dilation-normalized and reference-normalized values
-    // Use dilation normalization as primary, reference as secondary
-    float blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
+
+    // Blend all normalization methods with adaptive weighting
+    float blendedDia;
+    if (profile.isProfileLearned) {
+      // Use profile-based normalization as primary when available
+      blendedDia = profileNormalizedDia * 0.5f + normalizedDia * 0.3f + refNormalizedDia * 0.2f;
+    } else {
+      // Fall back to dilation + reference when profile not yet learned
+      blendedDia = normalizedDia * 0.7f + refNormalizedDia * 0.3f;
+    }
     blendedDia = std::clamp(blendedDia, 0.0f, 1.0f);
-    
-    // Calculate uncertainty based on gaze angle, reference stability, and dilation consistency
+
+    // Calculate uncertainty based on gaze angle, reference stability, dilation consistency, and profile learning
     float gazeUncertainty = std::sin(gazeAngle);  // Higher angle = more uncertainty
     float refUncertainty = (refs.openDia.stability + refs.closedDia.stability) * 0.5f;
-    float dilationUncertainty = 1.0f - (m_dilationNormalizer.sampleCount > 100 ? 0.8f : 0.3f); // More uncertain early on
-    float totalUncertainty = std::sqrt(gazeUncertainty * gazeUncertainty + 
-                                      refUncertainty * refUncertainty + 
-                                      dilationUncertainty * dilationUncertainty);
-    
+    float dilationUncertainty = 1.0f - (m_dilationNormalizer.sampleCount > 100 ? 0.8f : 0.3f);
+    float profileUncertainty = profile.isProfileLearned ? 0.2f : 0.6f;  // Lower uncertainty when profile is learned
+    float totalUncertainty = std::sqrt(gazeUncertainty * gazeUncertainty +
+                                      refUncertainty * refUncertainty +
+                                      dilationUncertainty * dilationUncertainty +
+                                      profileUncertainty * profileUncertainty) * 0.5f;  // Scale down
+
     return {blendedDia, totalUncertainty, 1.0f - totalUncertainty, "diameter"};
   }
 
-  CueMeasurement ModernEyelidEstimator::MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs) {
-    // Normalize position - standard logic: higher Y = more open eyes
+  CueMeasurement ModernEyelidEstimator::MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs, const EyeShapeProfile& profile) {
+    // Use adaptive eye shape profile for normalization if available
+    float profileNormalizedPos = profile.NormalizePupilPosY(eye.pupilPosY);
+
+    // Normalize position using gaze-aware references
     float denom = std::max(refs.openPosY.value - refs.closedPosY.value, 1e-6f);
-    float normalizedPos = (eye.pupilPosY - refs.closedPosY.value) / denom;
+    float refNormalizedPos = (eye.pupilPosY - refs.closedPosY.value) / denom;
+    refNormalizedPos = std::clamp(refNormalizedPos, 0.0f, 1.0f);
+
+    // Apply gaze-specific compensation from LUT
+    float gazeCompensation = GetGazeCompensation(eye.gazeDir, refs);
+    float compensatedPos = refNormalizedPos * gazeCompensation;
+    compensatedPos = std::clamp(compensatedPos, 0.0f, 1.0f);
+
+    // Blend profile-based and reference-based normalization
+    float normalizedPos;
+    if (profile.isProfileLearned) {
+      normalizedPos = profileNormalizedPos * 0.6f + compensatedPos * 0.4f;
+    } else {
+      normalizedPos = compensatedPos;
+    }
     normalizedPos = std::clamp(normalizedPos, 0.0f, 1.0f);
-    
+
     // Position is less affected by gaze angle than diameter
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
-    float uncertainty = std::sin(gazeAngle) * 0.5f;  // Less sensitive to gaze angle
-    
+    float gazeUncertainty = std::sin(gazeAngle) * 0.5f;  // Less sensitive to gaze angle
+    float profileUncertainty = profile.isProfileLearned ? 0.1f : 0.4f;
+    float uncertainty = std::sqrt(gazeUncertainty * gazeUncertainty + profileUncertainty * profileUncertainty);
+
     return {normalizedPos, uncertainty, 1.0f - uncertainty, "position"};
   }
 
@@ -195,35 +233,66 @@ namespace psvr2_toolkit {
     }
   }
 
-  void ModernEyelidEstimator::UpdateReferences(const EyeData& eye, GazeAwareReferences& refs) {
+  void ModernEyelidEstimator::UpdateReferences(const EyeData& eye, GazeAwareReferences& refs, EyeShapeProfile& profile) {
     if (!eye.isValid) return;
-    
-    // Determine learning rate based on gaze angle and stability
+
+    // Note: Eye shape profile is now updated in MeasureDiameterCue with corrected values
+
+    // Adaptive learning: detect significant changes and enable fast learning
+    if (m_config.enableAdaptiveLearning) {
+      if (DetectSignificantChange(eye)) {
+        EnableFastLearningMode();
+      }
+
+      // Update fast learning state
+      if (m_fastLearningState.isEnabled) {
+        m_fastLearningState.framesSinceTrigger++;
+        if (m_fastLearningState.framesSinceTrigger >= m_fastLearningState.fastLearningDuration) {
+          DisableFastLearningMode();
+        }
+      }
+    }
+
+    // Determine learning rate based on gaze angle, stability, and fast learning mode
     float gazeAngle = CalculateGazeAngle(eye.gazeDir);
     float angleConfidence = std::cos(gazeAngle);  // Higher confidence at neutral gaze
-    
+
+    // Apply learning rate multiplier if in fast learning mode
+    float learningMultiplier = m_fastLearningState.isEnabled ?
+                              (m_fastLearningState.fastLearningRate / m_fastLearningState.originalLearningRate) : 1.0f;
+
     if (eye.isBlink) {
       // Fast learning for closed references when blinking
-      refs.closedDia.Update(eye.pupilDiaMm, 0.8f);
-      refs.closedPosY.Update(eye.pupilPosY, 0.8f);
+      float blinkLearningRate = 0.8f * learningMultiplier;
+      blinkLearningRate = std::min(blinkLearningRate, 0.95f);  // Cap at 95%
+      refs.closedDia.Update(eye.pupilDiaMm, blinkLearningRate);
+      refs.closedPosY.Update(eye.pupilPosY, blinkLearningRate);
     } else if (IsNeutralGaze(eye.gazeDir)) {
       // Slower learning for open references, only at neutral gaze
       // Only update if we have a reasonable difference from closed reference
       if (std::abs(eye.pupilDiaMm - refs.closedDia.value) > 0.5f) {
-        refs.openDia.Update(eye.pupilDiaMm, 0.3f * angleConfidence);
+        float openLearningRate = 0.3f * angleConfidence * learningMultiplier;
+        openLearningRate = std::min(openLearningRate, 0.8f);  // Cap at 80%
+        refs.openDia.Update(eye.pupilDiaMm, openLearningRate);
       }
       if (std::abs(eye.pupilPosY - refs.closedPosY.value) > 0.1f) {
-        refs.openPosY.Update(eye.pupilPosY, 0.3f * angleConfidence);
+        float openLearningRate = 0.3f * angleConfidence * learningMultiplier;
+        openLearningRate = std::min(openLearningRate, 0.8f);  // Cap at 80%
+        refs.openPosY.Update(eye.pupilPosY, openLearningRate);
       }
     }
-    
-    // Update angle-specific references
-    int angleBin = static_cast<int>(gazeAngle * m_config.gazeAngleBins);
-    if (angleBin >= 0 && angleBin < 10) {  // Bounds check for array
-      if (refs.angleSpecificRefs[angleBin].sampleCount == 0) {
-        refs.angleSpecificRefs[angleBin] = AdaptiveReference(eye.pupilDiaMm, 0.01f);
+
+    // Update gaze compensation LUT
+    // Learn how gaze angle affects pupil measurements
+    if (!eye.isBlink) {
+      // Calculate expected vs observed pupil size to learn compensation
+      float expectedDia = refs.openDia.value;
+      float observedDia = eye.pupilDiaMm;
+      if (expectedDia > 0.1f) {
+        float compensation = expectedDia / observedDia;
+        compensation = std::clamp(compensation, 0.5f, 2.0f);  // Reasonable bounds
+        UpdateGazeLUT(eye.gazeDir, compensation, refs);
       }
-      refs.angleSpecificRefs[angleBin].Update(eye.pupilDiaMm, angleConfidence);
     }
   }
 
@@ -345,6 +414,44 @@ namespace psvr2_toolkit {
     m_eyeGeometryCalibrator = EyeGeometryCalibrator();
   }
 
+  void ModernEyelidEstimator::EnableFastLearningMode() {
+    m_fastLearningState.isEnabled = true;
+    m_fastLearningState.framesSinceTrigger = 0;
+  }
+
+  void ModernEyelidEstimator::DisableFastLearningMode() {
+    m_fastLearningState.isEnabled = false;
+  }
+
+  bool ModernEyelidEstimator::DetectSignificantChange(const EyeData& eye) {
+    if (!eye.isValid || eye.isBlink) return false;
+
+    // Initialize on first call
+    if (m_fastLearningState.lastPupilDia == 0.0f) {
+      m_fastLearningState.lastPupilDia = eye.pupilDiaMm;
+      m_fastLearningState.lastPupilPosY = eye.pupilPosY;
+      return false;
+    }
+
+    // Calculate change magnitude
+    float diaDelta = std::abs(eye.pupilDiaMm - m_fastLearningState.lastPupilDia);
+    float posDelta = std::abs(eye.pupilPosY - m_fastLearningState.lastPupilPosY);
+
+    // Normalize changes
+    float diaDeltaNorm = diaDelta / std::max(m_fastLearningState.lastPupilDia, 0.1f);
+    float posDeltaNorm = posDelta;  // Position is already normalized
+
+    // Detect significant change
+    bool significantChange = (diaDeltaNorm > m_fastLearningState.changeThreshold) ||
+                            (posDeltaNorm > m_fastLearningState.changeThreshold);
+
+    // Update last values
+    m_fastLearningState.lastPupilDia = eye.pupilDiaMm;
+    m_fastLearningState.lastPupilPosY = eye.pupilPosY;
+
+    return significantChange;
+  }
+
   // EyeGeometryCalibrator implementation
   void ModernEyelidEstimator::EyeGeometryCalibrator::UpdateCalibration(const EyeData& eye) {
     if (!eye.isValid) return;
@@ -359,9 +466,9 @@ namespace psvr2_toolkit {
 
   void ModernEyelidEstimator::EyeGeometryCalibrator::UpdateEyeGeometry(const EyeData& eye, const Vector3& gazeDir) {
     // Learn individual eye geometry parameters
-    static int sampleCount = 0;
-    sampleCount++;
-    
+    // FIXED: Changed from static to member variable
+    m_eyeGeometry.sampleCount++;
+
     // Estimate pupil center offset from gaze direction
     // When looking straight ahead, pupil should be centered
     if (gazeDir.z > 0.95f) { // Near neutral gaze
@@ -373,16 +480,16 @@ namespace psvr2_toolkit {
         m_eyeGeometry.pupilCenterOffset.z * 0.95f + currentOffset.z * 0.05f
       );
     }
-    
+
     // Learn eye radius from pupil diameter and position
     if (eye.pupilDiaMm > 0) {
       float estimatedRadius = EstimateEyeRadius(eye);
-      m_eyeGeometry.eyeRadiusMm = m_eyeGeometry.eyeRadiusMm * 0.98f + 
+      m_eyeGeometry.eyeRadiusMm = m_eyeGeometry.eyeRadiusMm * 0.98f +
                                  estimatedRadius * 0.02f;
     }
-    
+
     // Mark as calibrated after sufficient samples
-    if (sampleCount > 100) {
+    if (m_eyeGeometry.sampleCount > 100) {
       m_eyeGeometry.isCalibrated = true;
     }
   }
@@ -615,14 +722,14 @@ namespace psvr2_toolkit {
     if (!isBlinking && !wasBlinking) {
       return normalOpenness;
     }
-    
+
     float targetOpenness = normalOpenness;
-    
+
     if (isBlinking) {
       // During blink: smoothly close to target
       float closeProgress = std::min(blinkStartTime * blinkCloseSpeed, 1.0f);
       targetOpenness = preBlinkOpenness * (1.0f - closeProgress) + blinkTarget * closeProgress;
-      
+
       // Add slight overshoot for natural feel
       if (closeProgress > 0.8f) {
         float overshootAmount = blinkOvershoot * (1.0f - closeProgress) / 0.2f;
@@ -633,15 +740,96 @@ namespace psvr2_toolkit {
       // Post-blink: smoothly return to normal
       float recoveryProgress = std::min(blinkStartTime * blinkOpenSpeed, 1.0f);
       targetOpenness = blinkTarget * (1.0f - recoveryProgress) + normalOpenness * recoveryProgress;
-      
+
       // Add slight overshoot when opening
       if (recoveryProgress < 0.3f) {
         float overshootAmount = blinkOvershoot * (0.3f - recoveryProgress) / 0.3f;
         targetOpenness = std::min(targetOpenness + overshootAmount, 1.0f);
       }
     }
-    
+
     return targetOpenness;
+  }
+
+  // Gaze LUT helper functions implementation
+  void ModernEyelidEstimator::GetLUTIndices(const Vector3& gazeDir, int& vertIdx, int& horizIdx) const {
+    // Convert gaze direction to LUT indices
+    // Vertical: based on Y component (up/down gaze)
+    // Horizontal: based on X component (left/right gaze)
+
+    constexpr int V_SIZE = GazeAwareReferences::GAZE_LUT_SIZE_V;
+    constexpr int H_SIZE = GazeAwareReferences::GAZE_LUT_SIZE_H;
+
+    // Map Y component (-1 to 1) to vertical index (0 to V_SIZE-1)
+    float normalizedY = (gazeDir.y + 1.0f) * 0.5f;  // Map to 0-1
+    normalizedY = std::clamp(normalizedY, 0.0f, 1.0f);
+    vertIdx = static_cast<int>(normalizedY * (V_SIZE - 1));
+    vertIdx = std::clamp(vertIdx, 0, V_SIZE - 1);
+
+    // Map X component (-1 to 1) to horizontal index (0 to H_SIZE-1)
+    float normalizedX = (gazeDir.x + 1.0f) * 0.5f;  // Map to 0-1
+    normalizedX = std::clamp(normalizedX, 0.0f, 1.0f);
+    horizIdx = static_cast<int>(normalizedX * (H_SIZE - 1));
+    horizIdx = std::clamp(horizIdx, 0, H_SIZE - 1);
+  }
+
+  void ModernEyelidEstimator::UpdateGazeLUT(const Vector3& gazeDir, float observedCompensation, GazeAwareReferences& refs) {
+    int vertIdx, horizIdx;
+    GetLUTIndices(gazeDir, vertIdx, horizIdx);
+
+    // Update LUT with exponential moving average
+    float& currentValue = refs.gazeCompensationLUT[vertIdx][horizIdx];
+    int& sampleCount = refs.gazeLUTSampleCount[vertIdx][horizIdx];
+
+    if (sampleCount == 0) {
+      // First sample for this cell
+      currentValue = observedCompensation;
+      sampleCount = 1;
+    } else {
+      // Exponential moving average with adaptive learning rate
+      float learningRate = std::min(0.1f, 1.0f / sampleCount);
+      currentValue = currentValue * (1.0f - learningRate) + observedCompensation * learningRate;
+      sampleCount++;
+    }
+  }
+
+  float ModernEyelidEstimator::GetGazeCompensation(const Vector3& gazeDir, const GazeAwareReferences& refs) const {
+    int vertIdx, horizIdx;
+    GetLUTIndices(gazeDir, vertIdx, horizIdx);
+
+    // Get the base compensation value
+    float baseCompensation = refs.gazeCompensationLUT[vertIdx][horizIdx];
+    int sampleCount = refs.gazeLUTSampleCount[vertIdx][horizIdx];
+
+    // If we don't have enough samples, use bilinear interpolation from neighboring cells
+    if (sampleCount < 5) {
+      // Collect neighboring values for interpolation
+      float sum = 0.0f;
+      int count = 0;
+
+      for (int dv = -1; dv <= 1; dv++) {
+        for (int dh = -1; dh <= 1; dh++) {
+          int nv = vertIdx + dv;
+          int nh = horizIdx + dh;
+
+          if (nv >= 0 && nv < GazeAwareReferences::GAZE_LUT_SIZE_V &&
+              nh >= 0 && nh < GazeAwareReferences::GAZE_LUT_SIZE_H &&
+              refs.gazeLUTSampleCount[nv][nh] > 0) {
+            sum += refs.gazeCompensationLUT[nv][nh];
+            count++;
+          }
+        }
+      }
+
+      if (count > 0) {
+        float neighborAverage = sum / count;
+        // Blend base compensation with neighbor average based on sample count
+        float blendFactor = sampleCount / 5.0f;
+        baseCompensation = baseCompensation * blendFactor + neighborAverage * (1.0f - blendFactor);
+      }
+    }
+
+    return baseCompensation;
   }
 
 }

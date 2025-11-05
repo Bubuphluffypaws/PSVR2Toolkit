@@ -87,7 +87,12 @@ namespace psvr2_toolkit {
     
     // Reset eye geometry calibrator (useful for new sessions)
     void ResetEyeGeometryCalibrator();
-    
+
+    // Adaptive learning mode control
+    void EnableFastLearningMode();
+    void DisableFastLearningMode();
+    bool DetectSignificantChange(const EyeData& eye);
+
     // Enhanced smoothing system with multiple options
     struct SmoothingSystem {
       enum SmoothingMethod {
@@ -126,7 +131,14 @@ namespace psvr2_toolkit {
         float buffer[BUFFER_SIZE];
         int currentIndex = 0;
         int sampleCount = 0;
-        
+
+        // FIXED: Added constructor to initialize buffer (was uninitialized!)
+        StrongAveraging() : currentIndex(0), sampleCount(0) {
+          for (int i = 0; i < BUFFER_SIZE; ++i) {
+            buffer[i] = 0.5f;  // Initialize to neutral value
+          }
+        }
+
         float Filter(float input) {
           buffer[currentIndex] = input;
           currentIndex = (currentIndex + 1) % BUFFER_SIZE;
@@ -221,20 +233,91 @@ namespace psvr2_toolkit {
       }
     };
     
+    // Eye shape profile for adaptive calibration
+    struct EyeShapeProfile {
+      float minPupilSize;            // Observed minimum pupil size
+      float maxPupilSize;            // Observed maximum pupil size
+      float minPupilPosY;            // Observed minimum Y position
+      float maxPupilPosY;            // Observed maximum Y position
+      float pupilSizeRange;          // Computed range for normalization
+      float eyelidTravelDistance;    // Vertical travel range
+      float asymmetryFactor;         // Left/right eye differences
+      bool isProfileLearned;         // Whether we have enough data
+      int sampleCount;               // Number of samples collected
+
+      EyeShapeProfile()
+        : minPupilSize(10.0f), maxPupilSize(0.0f)  // Initialize with inverted range for proper min/max tracking
+        , minPupilPosY(10.0f), maxPupilPosY(0.0f)
+        , pupilSizeRange(2.0f), eyelidTravelDistance(0.1f)
+        , asymmetryFactor(1.0f), isProfileLearned(false), sampleCount(0) {}
+
+      void UpdateProfile(float pupilDia, float pupilPosY, bool isBlink) {
+        sampleCount++;
+
+        // Update min/max ranges
+        if (isBlink) {
+          minPupilSize = std::min(minPupilSize, pupilDia);
+          minPupilPosY = std::min(minPupilPosY, pupilPosY);
+        } else {
+          maxPupilSize = std::max(maxPupilSize, pupilDia);
+          maxPupilPosY = std::max(maxPupilPosY, pupilPosY);
+        }
+
+        // Update computed values
+        pupilSizeRange = std::max(0.5f, maxPupilSize - minPupilSize);
+        eyelidTravelDistance = std::max(0.02f, maxPupilPosY - minPupilPosY);
+
+        // Mark as learned after sufficient samples
+        if (sampleCount > 50) {
+          isProfileLearned = true;
+        }
+      }
+
+      float NormalizePupilDia(float pupilDia) const {
+        if (!isProfileLearned || pupilSizeRange < 0.1f) {
+          // Fallback to default normalization
+          return std::clamp((pupilDia - 2.0f) / 2.0f, 0.0f, 1.0f);
+        }
+        return std::clamp((pupilDia - minPupilSize) / pupilSizeRange, 0.0f, 1.0f);
+      }
+
+      float NormalizePupilPosY(float pupilPosY) const {
+        if (!isProfileLearned || eyelidTravelDistance < 0.01f) {
+          // Fallback to default normalization
+          return std::clamp((pupilPosY - 0.45f) / 0.1f, 0.0f, 1.0f);
+        }
+        return std::clamp((pupilPosY - minPupilPosY) / eyelidTravelDistance, 0.0f, 1.0f);
+      }
+    };
+
     // Gaze-aware references for each eye
     struct GazeAwareReferences {
       AdaptiveReference openDia;
       AdaptiveReference closedDia;
       AdaptiveReference openPosY;
       AdaptiveReference closedPosY;
-      
-      // Learn different references for different gaze angles (simplified array approach)
-      AdaptiveReference angleSpecificRefs[10];  // 10 angle bins
-      
-      GazeAwareReferences() 
+
+      // Continuous 2D gaze compensation lookup table (replaced 10-bin array)
+      static constexpr int GAZE_LUT_SIZE_V = 20;  // Vertical resolution
+      static constexpr int GAZE_LUT_SIZE_H = 20;  // Horizontal resolution
+      float gazeCompensationLUT[GAZE_LUT_SIZE_V][GAZE_LUT_SIZE_H];
+      int gazeLUTSampleCount[GAZE_LUT_SIZE_V][GAZE_LUT_SIZE_H];
+
+      GazeAwareReferences()
         : openDia(4.0f, 0.005f), closedDia(2.0f, 0.01f)
-        , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {}
+        , openPosY(0.55f, 0.005f), closedPosY(0.45f, 0.01f) {
+        // Initialize LUT with neutral values
+        for (int v = 0; v < GAZE_LUT_SIZE_V; v++) {
+          for (int h = 0; h < GAZE_LUT_SIZE_H; h++) {
+            gazeCompensationLUT[v][h] = 1.0f;  // Neutral compensation
+            gazeLUTSampleCount[v][h] = 0;
+          }
+        }
+      }
     } m_leftRefs, m_rightRefs;
+
+    // Eye shape profiles for adaptive per-user calibration
+    EyeShapeProfile m_leftEyeProfile, m_rightEyeProfile;
     
     // Pupil dilation normalization system
     struct PupilDilationNormalizer {
@@ -292,10 +375,11 @@ namespace psvr2_toolkit {
         float eyelidThickness;             // Eyelid thickness factor
         Vector3 eyeCenter;                 // Estimated eye center position
         bool isCalibrated;                 // Whether geometry is learned
-        
-        EyeGeometry() : pupilCenterOffset(0,0,0), eyeRadiusMm(12.0f), 
+        int sampleCount;                   // Number of calibration samples (FIXED: was static in cpp)
+
+        EyeGeometry() : pupilCenterOffset(0,0,0), eyeRadiusMm(12.0f),
                        eyelidCurvature(1.0f), eyelidThickness(1.0f),
-                       eyeCenter(0,0,0), isCalibrated(false) {}
+                       eyeCenter(0,0,0), isCalibrated(false), sampleCount(0) {}
       } m_eyeGeometry;
       
       // Gaze-dependent eyelid behavior modeling
@@ -388,9 +472,26 @@ namespace psvr2_toolkit {
       // Get current blink-influenced openness
       float GetBlinkInfluencedOpenness(float normalOpenness, float deltaTime);
     } m_blinkTweener;
-    
+
     SmoothingSystem m_smoothingSystem;  // Instance of the public SmoothingSystem struct
-    
+
+    // Smoothing state (FIXED: was static, now member variable)
+    float m_lastOpenness = 0.5f;
+
+    // Fast learning mode state
+    struct FastLearningState {
+      bool isEnabled = false;
+      int framesSinceTrigger = 0;
+      int fastLearningDuration = 100;  // Number of frames to use fast learning
+      float originalLearningRate = 0.005f;
+      float fastLearningRate = 0.05f;
+
+      // Change detection
+      float lastPupilDia = 0.0f;
+      float lastPupilPosY = 0.0f;
+      float changeThreshold = 0.3f;  // Threshold for detecting significant changes
+    } m_fastLearningState;
+
     // Configuration
     struct Config {
       float minLearningRate = 0.001f;
@@ -400,29 +501,37 @@ namespace psvr2_toolkit {
       float smoothingAlpha = 0.1f;
       float minConfidence = 0.1f;
       bool invertOutput = true;  // Set to true if output is inverted - REVERTED: This was fixing inverted output issue
-      
+
       // Blink augmentation parameters - DISABLED for instant blinks
       bool enableBlinkAugmentation = false;    // Disabled - blinks should be instant, not gradual
       float blinkOverrideStrength = 0.8f;     // How much blink data overrides estimation (0-1)
-      
+
       // Eye geometry calibration parameters
       bool enableEyeGeometryCalibration = true; // Whether to use adaptive eye geometry calibration
       bool enableGazeDependentBehavior = true;   // Whether to model gaze-dependent eyelid behavior
       bool enablePupilOcclusionCompensation = true; // Whether to compensate for pupil occlusion
       float geometryCalibrationStrength = 0.7f; // How much to trust geometry calibration (0-1)
+
+      // Adaptive learning parameters
+      bool enableAdaptiveLearning = true;  // Enable automatic fast learning on detected changes
     } m_config;
     
     // Private helper functions
-    void UpdateReferences(const EyeData& eye, GazeAwareReferences& refs);
+    void UpdateReferences(const EyeData& eye, GazeAwareReferences& refs, EyeShapeProfile& profile);
     void UpdateNeutralGaze(const EyeData& leftEye, const EyeData& rightEye);
     float FuseCues(const std::vector<CueMeasurement>& cues);
     float CalculateOverallConfidence(const std::vector<CueMeasurement>& cues);
     std::string DeterminePrimaryCue(const std::vector<CueMeasurement>& cues);
-    CueMeasurement MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs);
-    CueMeasurement MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs);
+    CueMeasurement MeasureDiameterCue(const EyeData& eye, const GazeAwareReferences& refs, EyeShapeProfile& profile);
+    CueMeasurement MeasurePositionCue(const EyeData& eye, const GazeAwareReferences& refs, const EyeShapeProfile& profile);
     CueMeasurement MeasureBlinkCue(const EyeData& eye);
     float CalculateGazeAngle(const Vector3& gazeDir) const;
     bool IsNeutralGaze(const Vector3& gazeDir);
+
+    // Gaze LUT helper functions
+    void UpdateGazeLUT(const Vector3& gazeDir, float observedCompensation, GazeAwareReferences& refs);
+    float GetGazeCompensation(const Vector3& gazeDir, const GazeAwareReferences& refs) const;
+    void GetLUTIndices(const Vector3& gazeDir, int& vertIdx, int& horizIdx) const;
     
   }; // class ModernEyelidEstimator
 
