@@ -66,7 +66,7 @@ static std::string GetDllDirectory() {
   // Get the handle to this DLL
   if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                         reinterpret_cast<LPCSTR>(&GetDllDirectory),
+                         (LPCSTR)&GetDllDirectory,
                          &hModule)) {
     // Get the full path to the DLL
     if (GetModuleFileNameA(hModule, dllPath, sizeof(dllPath)) > 0) {
@@ -446,7 +446,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             reinterpret_cast<LPCSTR>(&CaesarUsbThreadGaze::poll), &hModule)) {
+                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
@@ -493,7 +493,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             reinterpret_cast<LPCSTR>(&CaesarUsbThreadGaze::poll), &hModule)) {
+                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
