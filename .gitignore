@@ -74,6 +74,7 @@ StyleCopReport.xml
 *_h.h
 *.ilk
 *.meta
+*.o
 *.obj
 *.iobj
 *.pch
@@ -401,3 +402,10 @@ FodyWeavers.xsd
 
 # MinHook
 !projects/psvr2_openvr_driver_ex/minhook/lib/*
+
+# Test files and documentation
+projects/psvr2_openvr_driver_ex/tests/
+projects/psvr2_openvr_driver_ex/docs/
+
+# macOS
+.DS_Store
