@@ -58,15 +58,18 @@ psvr2_toolkit::ModernEyelidEstimator rightEyelidEstimator;    // MODERN implemen
 // Headset calibrator for geometric compensation
 psvr2_toolkit::HeadsetCalibrator headsetCalibrator;
 
+// Static dummy variable for GetModuleHandleExA
+static int g_dummyForModuleHandle = 0;
+
 // Get the directory where the driver DLL is located
 static std::string GetDllDirectory() {
   char dllPath[MAX_PATH];
   HMODULE hModule = NULL;
 
-  // Get the handle to this DLL
+  // Get the handle to this DLL using address of a static variable in this module
   if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                         (LPCSTR)&GetDllDirectory,
+                         (LPCSTR)&g_dummyForModuleHandle,
                          &hModule)) {
     // Get the full path to the DLL
     if (GetModuleFileNameA(hModule, dllPath, sizeof(dllPath)) > 0) {
@@ -446,7 +449,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+                             (LPCSTR)&g_dummyForModuleHandle, &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
@@ -493,7 +496,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+                             (LPCSTR)&g_dummyForModuleHandle, &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
