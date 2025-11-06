@@ -8,6 +8,7 @@
 #include "headset_calibrator.h"
 #include "hmd2_gaze.h"
 #include "ipc_server.h"
+#include "util.h"
 
 #include <cstdlib>
 #include <chrono>
@@ -65,7 +66,7 @@ static std::string GetDllDirectory() {
   // Get the handle to this DLL
   if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                         (LPCSTR)&GetDllDirectory,
+                         reinterpret_cast<LPCSTR>(&GetDllDirectory),
                          &hModule)) {
     // Get the full path to the DLL
     if (GetModuleFileNameA(hModule, dllPath, sizeof(dllPath)) > 0) {
@@ -188,9 +189,9 @@ static void LogEyeTrackingData(const Hmd2GazeState* pGazeState) {
     pGazeState->rightEye.posGuide.y,
     pGazeState->rightEye.blink ? 1 : 0,
     // Combined gaze data
-    pGazeState->combinedGaze.gazeOriginMm.x,
-    pGazeState->combinedGaze.gazeOriginMm.y,
-    pGazeState->combinedGaze.gazeOriginMm.z);
+    pGazeState->combined.gazeOriginMm.x,
+    pGazeState->combined.gazeOriginMm.y,
+    pGazeState->combined.gazeOriginMm.z);
 
   // Flush the file every 60 frames to prevent data loss
   g_framesSinceFlush++;
@@ -445,7 +446,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+                             reinterpret_cast<LPCSTR>(&CaesarUsbThreadGaze::poll), &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
@@ -455,7 +456,11 @@ int CaesarUsbThreadGaze::poll() {
 
         // Open dump file
         std::string dumpPath = dllDir + "\\psvr2_raw_gaze_packet.bin";
+#ifdef _MSC_VER
+        fopen_s(&rawDumpFile, dumpPath.c_str(), "wb");
+#else
         rawDumpFile = fopen(dumpPath.c_str(), "wb");
+#endif
         if (rawDumpFile) {
           Util::DriverLog("[PSVR2Toolkit] Dumping RAW packet to: %s", dumpPath.c_str());
           // Write first RAW packet to file
@@ -488,7 +493,7 @@ int CaesarUsbThreadGaze::poll() {
       HMODULE hModule = nullptr;
       if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                             (LPCSTR)&CaesarUsbThreadGaze::poll, &hModule)) {
+                             reinterpret_cast<LPCSTR>(&CaesarUsbThreadGaze::poll), &hModule)) {
         GetModuleFileNameA(hModule, dllPath, MAX_PATH);
         std::string dllDir(dllPath);
         size_t lastSlash = dllDir.find_last_of("\\/");
@@ -498,7 +503,11 @@ int CaesarUsbThreadGaze::poll() {
 
         // Open dump file
         std::string dumpPath = dllDir + "\\psvr2_cal_gaze_packet.bin";
+#ifdef _MSC_VER
+        fopen_s(&calDumpFile, dumpPath.c_str(), "wb");
+#else
         calDumpFile = fopen(dumpPath.c_str(), "wb");
+#endif
         if (calDumpFile) {
           Util::DriverLog("[PSVR2Toolkit] Dumping CAL packet to: %s", dumpPath.c_str());
           // Write first CAL packet to file
